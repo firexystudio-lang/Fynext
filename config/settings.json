@@ -1,0 +1,19 @@
+{
+  "agentName": "fynext",
+  "ollamaUrl": "http://127.0.0.1:11434",
+  "model": "qwen2.5-coder:7b",
+  "systemPromptFile": "config/system_prompt.txt",
+  "numCtx": 16384,
+  "maxNewTokens": 2048,
+  "temperature": 0.1,
+  "maxToolRounds": 15,
+  "approveDestructive": true,
+  "allowOutsideWorkspace": true,
+  "keepAlive": "10m",
+  "searchProvider": "duckduckgo",
+  "searxngUrl": "",
+  "requestTimeoutSec": 30,
+  "maxOutputChars": 20000,
+  "maxReadBytes": 4194304,
+  "maxListEntries": 1000
+}
