@@ -39,6 +39,22 @@ It is an open-source solution that runs securely on your computer.
 | **Fast Processing** | Runs fast thanks to optimized performance. |
 | **Targeted Solutions** | Customizable for specific tasks. |
 
+## Possible Additions
+
+Fynext can be extended in several useful directions to make it more powerful for everyday development workflows:
+
+- **Project-aware AI summaries**: Add automatic summaries for repositories, modules, and folders so the agent can explain architecture quickly.
+- **Task automation workflows**: Support repeatable workflows such as "run tests", "build project", "generate changelog", and "open PR summary" with guided steps.
+- **Better code review support**: Detect bugs, risky patterns, performance issues, and security concerns before a change is merged.
+- **Multi-model switching**: Allow quick switching between local and remote LLM providers with saved preferences per workspace.
+- **Context indexing**: Create a searchable local index of project files and documentation to help the agent answer codebase-specific questions faster.
+- **Git integration**: Add review of diffs, commit messages, branch comparisons, and branch-specific file recommendations.
+- **Autonomous planning mode**: Allow Fynext to propose execution plans before modifying code, especially for larger refactors.
+- **Documentation generation**: Auto-generate README, API docs, and inline comments from code structure and conventions.
+- **User-friendly plugins**: Expose a lightweight extension system for custom tools, commands, and workspace presets.
+
+These additions would make Fynext more useful as an everyday local engineering assistant while keeping its focus on privacy, local execution, and developer control.
+
 ## Getting Started
 
 ### Requirements

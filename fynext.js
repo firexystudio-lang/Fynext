@@ -186,6 +186,46 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+function startStartupSplash(stdout) {
+  const word = 'fynext';
+  const colors = [196, 202, 208, 202];
+  let frame = 0;
+  let stopped = false;
+
+  function draw() {
+    const columns = stdout.columns || 80;
+    const rows = stdout.rows || 24;
+    const row = Math.max(1, Math.ceil(rows / 2));
+    const column = Math.max(1, Math.floor((columns - word.length) / 2) + 1);
+    let text = '';
+    for (let i = 0; i < word.length; i += 1) {
+      const color = colors[(i + frame) % colors.length];
+      text += `\x1b[38;5;${color}m${word[i]}`;
+    }
+    stdout.write(`\x1b[${row};${column}H\x1b[2K${text}\x1b[0m`);
+    frame += 1;
+  }
+
+  stdout.write('\x1b[?25l\x1b[2J');
+  draw();
+  const timer = setInterval(draw, 100);
+  const onResize = () => draw();
+  const onExit = () => stop();
+  stdout.on('resize', onResize);
+  process.once('exit', onExit);
+
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    stdout.removeListener('resize', onResize);
+    process.removeListener('exit', onExit);
+    stdout.write('\x1b[0m\x1b[2J\x1b[H\x1b[?25h');
+  }
+
+  return stop;
+}
+
 function buildSystemPrompt(cfg, base, mode) {
   const env = [
     '',
@@ -258,16 +298,24 @@ async function main() {
   const plainRepl = !interactive && flags.plain && !!process.stdin.isTTY && flags.prompt == null;
 
   const uiMode = interactive || plainRepl;
+  const startupSplash = uiMode && process.stdout.isTTY
+    ? startStartupSplash(process.stdout)
+    : null;
   const setupLog = uiMode && process.stdout.isTTY
-    ? (line) => process.stdout.write(line + '\n')
+    ? (startupSplash ? () => {} : (line) => process.stdout.write(line + '\n'))
     : (line) => process.stderr.write(line + '\n');
   try {
-    await setup.ensureReady(cfg, { tty: uiMode && !!process.stdout.isTTY, log: setupLog });
+    await setup.ensureReady(cfg, {
+      tty: uiMode && !!process.stdout.isTTY && !startupSplash,
+      log: setupLog
+    });
   } catch (err) {
+    if (startupSplash) startupSplash();
     process.stderr.write(`fynext: ${err.message}\n`);
     process.exitCode = 1;
     return;
   }
+  if (startupSplash) startupSplash();
 
   let systemPromptBase = loadSystemPrompt(cfg);
   let mode = 'build';
