@@ -8,7 +8,7 @@
 █▒▒▒▒▒▒█    █▒▒▒█▄█▒▒▒█ █▒▒▒█ █▒▒▒█ █▒▒▒███▒▒▒█ █▒▒▒▒▒▒▒▒▒█ █▒▒▒█      
 █▓▓▓█▀▀▀    █▓▓▓▓▓▓▓▓▓█ █▓▓▓█ █▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀█▓▓▓█ █▓▓▓█      
 █████       ███████████ █████ █████ ███████████ █████ █████ █████      
-▀▀▀▀▀       ▀▀▀▀▀▀▀▀▀▀▀  ▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ yapay zeka
+▀▀▀▀▀       ▀▀▀▀▀▀▀▀▀▀▀  ▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀
 ```
 
 # Fynext - Local Code Agent AI
@@ -43,7 +43,7 @@ npm install -g github:firexystudio-lang/Fynext
 ```
 ## 🤝 Katkıda Bulunun
 
-Katkılarınız hoş geldiniz! Lütfen:
+Katkılarınız biizm için çok önemli
 
 1. Repo'yu fork edin
 2. Feature branch oluşturun (`git checkout -b feature/AmazingFeature`)
@@ -59,7 +59,7 @@ Bu proje MIT Lisansı altında lisanslanmıştır - ayrıntılar için [LICENSE]
 
 **FirexyTeam**
 - Website: [firexy.ct.ws](https://firexy.ct.ws)
-- Email: [contact@firexyteam.com](mfiretechh@gmail.com)
+- Email: [mfiretechh@gmail.com](mfiretechh@gmail.com)
 - GitHub: [firexystudio](https://github.com/firexystudio-lang)
 
 ## ⭐ Destek
