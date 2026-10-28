@@ -352,6 +352,7 @@ class Screen {
     this.headerMode = true;
     this.scrollAnchor = null;
     this.notice = '';
+    this.commandResult = null;
     this.thinkingTick = 0;
     this.thinkingExpanded = false;
     this.pendingConfirm = null;
@@ -723,7 +724,7 @@ class Screen {
     if (!this.started) return;
     const { cols, rows } = this.dimensions();
     const frame = this._compose(cols, rows);
-    const dimBackground = !!(this.pendingConfirm && this.pendingConfirm.centered);
+    const dimBackground = !!(this.commandResult || (this.pendingConfirm && this.pendingConfirm.centered));
     const background = dimBackground ? '\x1b[48;5;233m' : C.bgDark;
     let out = ESC + '?25l';
     for (let i = 0; i < rows; i += 1) {
@@ -758,10 +759,82 @@ class Screen {
 
   _compose(cols, rows) {
     const frame = this.headerMode ? this._composeHeader(cols, rows) : this._composeChat(cols, rows);
-    if (this.pendingConfirm && this.pendingConfirm.centered) {
+    if (this.commandResult) {
+      frame.dialogRows = this._drawCommandResultDialog(frame.lines, cols, rows);
+    } else if (this.pendingConfirm && this.pendingConfirm.centered) {
       frame.dialogRows = this._drawConfirmDialog(frame.lines, cols, rows);
     }
     return frame;
+  }
+
+  showCommandResult(text, options) {
+    const opts = options || {};
+    this.commandResult = {
+      text: sanitize(text),
+      error: !!opts.error,
+      scroll: 0
+    };
+    this.scheduleRender();
+  }
+
+  _drawCommandResultDialog(lines, cols, rows) {
+    const result = this.commandResult;
+    const width = Math.max(12, Math.min(96, cols - 2));
+    const innerWidth = width - 4;
+    const body = wrapText(result.text, innerWidth);
+    const height = Math.min(rows, Math.max(5, Math.min(body.length + 3, rows - 2)));
+    const bodyRows = Math.max(1, height - 3);
+    const maxScroll = Math.max(0, body.length - bodyRows);
+    result.scroll = Math.max(0, Math.min(result.scroll, maxScroll));
+    const visibleBody = body.slice(result.scroll, result.scroll + bodyRows);
+    const title = result.error ? 'komut hatası' : 'komut sonucu';
+    const topPrefix = '╭─ ' + C.accent + title + C.reset + ' ';
+    const top = topPrefix + '─'.repeat(Math.max(0, width - visibleWidth(topPrefix) - 1)) + '╮';
+    const footer = C.grayDim + '↑/↓ kaydır  ·  Enter/Esc kapat' + C.reset;
+    const bottom = '╰' + '─'.repeat(width - 2) + '╯';
+    const panelize = (text) =>
+      C.bgPanel + text.replace(/\x1b\[0m/g, '\x1b[0m' + C.bgPanel) + C.bgPanel;
+    const modalLines = [panelize(top)];
+    for (let i = 0; i < bodyRows; i += 1) {
+      const style = result.error ? C.red : C.text;
+      const line = truncateVisible(style + (visibleBody[i] || '') + C.reset, innerWidth);
+      modalLines.push(
+        panelize(C.border + '│' + C.reset + ' ' + line +
+          ' '.repeat(Math.max(0, innerWidth - visibleWidth(line))) + ' ' +
+          C.border + '│' + C.reset)
+      );
+    }
+    const hint = truncateVisible(footer, innerWidth);
+    modalLines.push(
+      panelize(C.border + '│' + C.reset + ' ' + hint +
+        ' '.repeat(Math.max(0, innerWidth - visibleWidth(hint))) + ' ' +
+        C.border + '│' + C.reset)
+    );
+    modalLines.push(panelize(bottom));
+
+    const startRow = Math.max(0, Math.floor((rows - modalLines.length) / 2));
+    const dialogRows = new Set();
+    for (let i = 0; i < modalLines.length && startRow + i < rows; i += 1) {
+      const line = modalLines[i];
+      const row = startRow + i;
+      lines[row] = ' '.repeat(Math.max(0, Math.floor((cols - visibleWidth(line)) / 2))) + line;
+      dialogRows.add(row);
+    }
+    return dialogRows;
+  }
+
+  _scrollCommandResult(delta) {
+    if (!this.commandResult) return false;
+    this.commandResult.scroll = Math.max(0, this.commandResult.scroll + delta);
+    this.scheduleRender();
+    return true;
+  }
+
+  _closeCommandResult() {
+    if (!this.commandResult) return false;
+    this.commandResult = null;
+    this.scheduleRender();
+    return true;
   }
 
   _drawConfirmDialog(lines, cols, rows) {
@@ -1638,6 +1711,15 @@ class Screen {
 
   _handleKey(key) {
     if (!key) return;
+    if (this.commandResult) {
+      if (key === 'up' || key === 'wheelup') return this._scrollCommandResult(-1);
+      if (key === 'down' || key === 'wheeldown') return this._scrollCommandResult(1);
+      if (key === 'pageup') return this._scrollCommandResult(-Math.max(1, this.dimensions().rows - 6));
+      if (key === 'pagedown') return this._scrollCommandResult(Math.max(1, this.dimensions().rows - 6));
+      if (key === 'enter' || key === 'escape') return this._closeCommandResult();
+      if (key === 'ctrl+c') return this._closeCommandResult();
+      return;
+    }
     if (this.pendingSelection) {
       const selection = this.pendingSelection;
       if (key === 'up' || key === 'wheelup') {

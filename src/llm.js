@@ -57,6 +57,12 @@ function toToolCall(obj) {
   return { id: fn.id || obj.id, name, arguments: normalizeArgs(args) };
 }
 
+function isToolCallCandidate(call, valid) {
+  return Boolean(call) &&
+    ((valid && valid.has(call.name)) ||
+      /^(?:fs|git|web|shell)_[a-z0-9_]+$/i.test(call.name));
+}
+
 function findJsonObjects(text) {
   const objs = [];
   const stack = [];
@@ -94,7 +100,7 @@ function scanBlock(block, valid) {
   for (const obj of findJsonObjects(block)) {
     const call = toToolCall(obj);
     if (!call) continue;
-    if (valid && !valid.has(call.name)) continue;
+    if (!isToolCallCandidate(call, valid)) continue;
     calls.push(call);
   }
   return calls;
@@ -208,8 +214,12 @@ function extractToolCalls(text, validNames) {
   
   const trimmed = text.trim();
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-    const call = toToolCall(JSON.parse(trimmed));
-    if (call && (!valid || valid.has(call.name))) return [call];
+    try {
+      const call = toToolCall(JSON.parse(trimmed));
+      if (isToolCallCandidate(call, valid)) return [call];
+    } catch (_) {
+      // The response may contain malformed or non-call JSON.
+    }
   }
   
   let m;
@@ -221,7 +231,7 @@ function extractToolCalls(text, validNames) {
     const block = m[0];
     if (m[1].toLowerCase() === 'tool') {
       const call = parseXmlTool(block);
-      if (call && (!valid || valid.has(call.name))) xmlCalls.push(call);
+      if (isToolCallCandidate(call, valid)) xmlCalls.push(call);
     } else {
       blocks.push(m[3]);
     }
@@ -534,4 +544,12 @@ async function warmup(cfg) {
   }
 }
 
-module.exports = { chat, listModels, listAvailableModels, modelSupportsTools, warmup, trimMessages };
+module.exports = {
+  chat,
+  listModels,
+  listAvailableModels,
+  modelSupportsTools,
+  warmup,
+  trimMessages,
+  extractToolCalls
+};

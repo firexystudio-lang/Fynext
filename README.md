@@ -82,6 +82,31 @@ npm install -g github:firexystudio-lang/Fynext
 >
 > This method is experimental. Before trying it, save any open work and close background apps.
 
+## Feature Roadmap
+
+Fynext now includes the full recommended feature set as a practical roadmap for the project, with a mix of shipped capabilities and planned extensions.
+
+| Feature | Status | Notes |
+| :-- | :-- | :-- |
+| Project-aware AI summaries | ✅ Implemented | Builds a project memory snapshot in `.fynext/project-memory.json` and keeps key files, languages and git details ready. |
+| Task automation workflows | ✅ Implemented | Built-in commands support review, status checks, planning and build-oriented flows. |
+| Better code review support | ✅ Implemented | `/review` and project memory analysis flag risky patterns, TODOs and secret-like strings. |
+| Multi-model switching | ✅ Implemented | The config supports multiple model profiles and can switch with `/model`. |
+| Context indexing | ✅ Implemented | Workspace metadata is cached for faster project-aware answers. |
+| Git integration | ✅ Implemented | Git branch, status and recent commits are surfaced through `/git` and `/project`. |
+| Autonomous planning mode | ✅ Implemented | `/plan` mode is available for read-only analysis and safe recommendations. |
+| Documentation generation | 🟡 Planned | Useful for README, API docs and inline code explanations. |
+| User-friendly plugins | 🟡 Planned | Configurable presets and custom workflow extensions can be layered on top of the existing tool system. |
+
+### Built-in workflow presets
+
+The project now ships with reusable action sets for common engineering tasks:
+
+- Review & risk check → `/project` → `/review` → `/git`
+- Build & validate → `/mode build` → `npm test` → `npm run build`
+- Changelog summary → `/git` → `git log --oneline -10` → summarize changes
+- PR summary → `/project` → `/git` → review changed files → summarize impact
+
 ## Contributing
 
 Your contributions are greatly appreciated. Use the **Issues** section for bug reports and suggestions, and follow the steps below to contribute code:

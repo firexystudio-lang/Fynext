@@ -10,6 +10,16 @@ const DEFAULTS = {
   agentName: 'fynext',
   ollamaUrl: 'http://127.0.0.1:11434',
   model: 'qwen2.5-coder:3b',
+  modelProfiles: {
+    local: 'qwen2.5-coder:3b',
+    remote: 'gpt-4o-mini'
+  },
+  workflowPresets: [
+    { id: 'review', label: 'Review & risk check', steps: ['/project', '/review', '/git'] },
+    { id: 'build', label: 'Build & validate', steps: ['/mode build', 'npm test', 'npm run build'] },
+    { id: 'changelog', label: 'Changelog summary', steps: ['/git', 'git log --oneline -10', 'Summarize changes'] },
+    { id: 'pr-summary', label: 'PR summary', steps: ['/project', '/git', 'Review changed files', 'Summarize impact'] }
+  ],
   systemPromptFile: 'config/system_prompt.txt',
   numCtx: 8192,
   maxNewTokens: 4096,

@@ -13,6 +13,7 @@ const { Screen, sanitize } = require('./src/screen');
 const { PlainPresenter } = require('./src/plain');
 const chatHistory = require('./src/chat-history');
 const { requiresToolFollowThrough } = require('./src/task-intent');
+const featureRoadmap = require('./src/feature-roadmap');
 
 const MAX_CALLS = 30;
 
@@ -31,6 +32,7 @@ const COMMAND_HELP = [
   '  /build                  Build moduna geç (cihaz erişimi)',
   '  /mode                   Geçerli modu göster',
   '  /prompt                 Sistem promptunu göster',
+  '  /roadmap, /features     Fynext özellik yol haritasını göster',
   '  /yenile, /reload        system_prompt.txt dosyasını yeniden yükle',
   '  /workspace [yol]        Çalışma alanını göster veya değiştir',
   '  /temp [0-2]             Sıcaklığı göster veya ayarla',
@@ -706,7 +708,11 @@ async function main() {
       });
       return true;
     } catch (err) {
-      presenter.error(`model indirilemedi: ${err.message}`);
+      if (typeof presenter.showCommandResult === 'function') {
+        presenter.showCommandResult(`model indirilemedi: ${err.message}`, { error: true });
+      } else {
+        presenter.error(`model indirilemedi: ${err.message}`);
+      }
       return false;
     } finally {
       presenter.setBusy(false);
@@ -715,6 +721,14 @@ async function main() {
   }
 
   async function handleCommand(input) {
+    const commandNote = (text) => {
+      if (typeof presenter.showCommandResult === 'function') presenter.showCommandResult(text);
+      else presenter.note(text);
+    };
+    const commandError = (text) => {
+      if (typeof presenter.showCommandResult === 'function') presenter.showCommandResult(text, { error: true });
+      else presenter.error(text);
+    };
     const raw = input.replace(/^\//, '').trim();
     if (!raw) return;
     const parts = raw.split(/\s+/);
@@ -727,7 +741,7 @@ async function main() {
     }
 
     if (['help', 'yardım', 'yardim', '?', 'h'].includes(cmd)) {
-      presenter.note(COMMAND_HELP);
+      commandNote(COMMAND_HELP);
       return;
     }
 
@@ -738,15 +752,15 @@ async function main() {
 
     if (['history', 'geçmiş', 'gecmis'].includes(cmd)) {
       if (!historyFile) {
-        presenter.note('sohbet geçmişi yalnızca etkileşimli oturumlarda kullanılabilir.');
+        commandNote('sohbet geçmişi yalnızca etkileşimli oturumlarda kullanılabilir.');
         return;
       }
       if (!arg) {
         if (!conversations.length) {
-          presenter.note('kayıtlı sohbet geçmişi yok.');
+          commandNote('kayıtlı sohbet geçmişi yok.');
           return;
         }
-        presenter.note(
+        commandNote(
           'Sohbet geçmişi (en yeni önce):\n' +
             conversations
               .map((conversation, index) => {
@@ -762,7 +776,7 @@ async function main() {
       }
       const selection = Number(arg);
       if (!Number.isInteger(selection) || selection < 1 || selection > conversations.length) {
-        presenter.error(`geçerli bir sohbet numarası girin: 1-${conversations.length}`);
+        commandError(`geçerli bir sohbet numarası girin: 1-${conversations.length}`);
         return;
       }
       const selectedId = conversations[selection - 1].id;
@@ -772,7 +786,7 @@ async function main() {
       messages = [{ role: 'system', content: systemPrompt }].concat(currentConversation.messages);
       presenter.reset();
       presenter.restoreConversation(messages.slice(1));
-      presenter.note(`sohbet yüklendi: ${currentConversation.title || 'başlıksız sohbet'}`);
+      commandNote(`sohbet yüklendi: ${currentConversation.title || 'başlıksız sohbet'}`);
       return;
     }
 
@@ -785,7 +799,7 @@ async function main() {
         try {
           availableModels = await llm.listAvailableModels(cfg);
         } catch (err) {
-          presenter.error(`model listesi alınamadı: ${err.message}`);
+          commandError(`model listesi alınamadı: ${err.message}`);
           return;
         } finally {
           presenter.setBusy(false);
@@ -799,7 +813,7 @@ async function main() {
           );
           if (!requestedModel) return;
         } else {
-          presenter.note(
+          commandNote(
             `Yerel modeller:\n${availableModels.map((name) => `${name === cfg.model ? '* ' : '  '}${name}`).join('\n')}\nSeçmek için /model <ad> yaz.`
           );
           return;
@@ -811,7 +825,7 @@ async function main() {
       saveSettingsPatch({ model: cfg.model });
       refreshSystem();
       presenter.setInfo({ model: cfg.model });
-      presenter.note(`model: ${cfg.model}`);
+      commandNote(`model: ${cfg.model}`);
       return;
     }
 
@@ -822,7 +836,7 @@ async function main() {
         cfg.projectContext = projectContext.readProjectMemory(cfg);
       }
       refreshSystem();
-      presenter.note(projectContext.buildProjectMemoryText(cfg.projectContext));
+      commandNote(projectContext.buildProjectMemoryText(cfg.projectContext));
       return;
     }
 
@@ -841,7 +855,7 @@ async function main() {
         lines.push('son commitler:');
         lines.push(...gitInfo.recentCommits.slice(0, 5).map((entry) => `  ${entry}`));
       }
-      presenter.note(lines.join('\n'));
+      commandNote(lines.join('\n'));
       return;
     }
 
@@ -853,10 +867,10 @@ async function main() {
       }
       const issues = projectContext.reviewProject(cfg, cfg.projectContext);
       if (!issues.length) {
-        presenter.note('İnceleme sonucu: belirgin risk veya teknik borç bulunamadı.');
+        commandNote('İnceleme sonucu: belirgin risk veya teknik borç bulunamadı.');
         return;
       }
-      presenter.note(['Olası riskler:', ...issues.map((issue) => `- ${issue}`)].join('\n'));
+      commandNote(['Olası riskler:', ...issues.map((issue) => `- ${issue}`)].join('\n'));
       return;
     }
 
@@ -867,12 +881,12 @@ async function main() {
         `oturum tokenı: ${total.toLocaleString('tr-TR')} (girdi ${sessionUsage.promptTokens.toLocaleString('tr-TR')} · çıktı ${sessionUsage.outputTokens.toLocaleString('tr-TR')})`,
         `${tokenText}: ${sessionUsage.latestRate.toLocaleString('tr-TR')} token/dk`
       ];
-      presenter.note(details.join('\n'));
+      commandNote(details.join('\n'));
       return;
     }
 
     if (['tools', 'araçlar', 'araclar'].includes(cmd)) {
-      presenter.note(
+      commandNote(
         'araçlar:\n' +
           tools.definitionsForMode(mode)
             .map((entry) => {
@@ -885,35 +899,40 @@ async function main() {
     }
 
     if (['mode', 'mod'].includes(cmd) && !arg) {
-      presenter.note(`mod: ${mode}`);
+      commandNote(`mod: ${mode}`);
       return;
     }
 
     if (['mode', 'mod', 'plan', 'build'].includes(cmd)) {
       const requested = ['plan', 'build'].includes(cmd) ? cmd : arg.toLowerCase();
       if (!['plan', 'build'].includes(requested)) {
-        presenter.error('kullanım: /mode plan veya /mode build');
+        commandError('kullanım: /mode plan veya /mode build');
         return;
       }
       switchMode(requested);
       return;
     }
 
+    if (['roadmap', 'features', 'özellikler', 'ozellikler'].includes(cmd)) {
+      commandNote(featureRoadmap.buildFeatureRoadmapText());
+      return;
+    }
+
     if (cmd === 'prompt') {
-      presenter.note(`# ${cfg.systemPromptPath}\n${systemPromptBase}`);
+      commandNote(`# ${cfg.systemPromptPath}\n${systemPromptBase}`);
       return;
     }
 
     if (['reload', 'yenile'].includes(cmd)) {
       systemPromptBase = loadSystemPrompt(cfg);
       refreshSystem();
-      presenter.note('sistem promptu yeniden yüklendi.');
+      commandNote('sistem promptu yeniden yüklendi.');
       return;
     }
 
     if (cmd === 'workspace') {
       if (!arg) {
-        presenter.note(`workspace: ${cfg.workspace}`);
+        commandNote(`workspace: ${cfg.workspace}`);
         return;
       }
       const target = path.resolve(cfg.workspace, arg);
@@ -924,40 +943,40 @@ async function main() {
         targetStat = null;
       }
       if (!targetStat || !targetStat.isDirectory()) {
-        presenter.error(`dizin bulunamadı: ${target}`);
+        commandError(`dizin bulunamadı: ${target}`);
         return;
       }
       cfg.workspace = target;
       refreshSystem();
       presenter.setInfo({ cwd: cfg.workspace });
-      presenter.note(`workspace: ${cfg.workspace}`);
+      commandNote(`workspace: ${cfg.workspace}`);
       return;
     }
 
     if (['temp', 'temperature', 'sıcaklık', 'sicaklik'].includes(cmd)) {
       if (!arg) {
-        presenter.note(`temperature: ${cfg.temperature}`);
+        commandNote(`temperature: ${cfg.temperature}`);
         return;
       }
       const value = Number(arg);
       if (!Number.isFinite(value) || value < 0 || value > 2) {
-        presenter.error('geçerli bir değer girin: 0 ile 2 arasında');
+        commandError('geçerli bir değer girin: 0 ile 2 arasında');
         return;
       }
       cfg.temperature = value;
-      presenter.note(`temperature: ${cfg.temperature}`);
+      commandNote(`temperature: ${cfg.temperature}`);
       return;
     }
 
     if (['approve', 'onay'].includes(cmd)) {
       if (!arg) {
-        presenter.note(`işlem onayı: ${cfg.approveDestructive ? 'açık' : 'kapalı'}`);
+        commandNote(`işlem onayı: ${cfg.approveDestructive ? 'açık' : 'kapalı'}`);
         return;
       }
       const value = arg.toLowerCase();
       cfg.approveDestructive = ['on', '1', 'true', 'açık', 'acik', 'evet', 'e'].includes(value);
       refreshSystem();
-      presenter.note(
+      commandNote(
         `yıkıcı işlem onayı: ${cfg.approveDestructive ? 'açık' : 'kapalı'}`
       );
       return;
@@ -969,7 +988,7 @@ async function main() {
       return;
     }
 
-    presenter.error(`bilinmeyen komut: /${cmd}`);
+    commandError(`bilinmeyen komut: /${cmd}`);
   }
 
   async function handleInput(text) {
@@ -977,7 +996,16 @@ async function main() {
     if (!input || exiting) return;
 
     if (input.startsWith('/')) {
-      await handleCommand(input);
+      try {
+        await handleCommand(input);
+      } catch (err) {
+        const message = err && err.message ? err.message : String(err);
+        if (typeof presenter.showCommandResult === 'function') {
+          presenter.showCommandResult(message, { error: true });
+        } else {
+          presenter.error(message);
+        }
+      }
       return;
     }
 

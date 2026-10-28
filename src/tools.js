@@ -706,11 +706,11 @@ const handlers = {
 };
 
 async function run(cfg, name, args, mode) {
-  const fn = handlers[name];
-  if (!fn) throw new Error('Bilinmeyen arac: ' + name);
   if (mode === 'plan' && !PLAN_TOOL_NAMES.has(name)) {
     throw new Error('PLAN modunda bu araca izin verilmiyor; dosya degisikligi BUILD modunda yapilabilir.');
   }
+  const fn = handlers[name];
+  if (!fn) throw new Error('Bilinmeyen arac: ' + name);
   const toolConfig = mode === 'plan'
     ? Object.assign({}, cfg, { mode: 'plan' })
     : cfg;
