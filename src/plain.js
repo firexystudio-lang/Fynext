@@ -22,6 +22,7 @@ class PlainPresenter {
     this.rl = null;
     this.pendingConfirm = null;
     this._thinking = false;
+    this._thinkingStatus = '';
     this._streamed = false;
     this._promptActive = false;
     this.usage = '';
@@ -49,7 +50,7 @@ class PlainPresenter {
   _finishStream() {
     if (this._thinking) {
       this._thinking = false;
-      if (this.color) this._write('\r\x1b[2K');
+      if (this.stdout.isTTY) this._write('\r\x1b[2K');
     }
     if (this._streamed) {
       this._streamed = false;
@@ -165,10 +166,23 @@ class PlainPresenter {
 
   beginThinking() {
     this._thinking = true;
+    this._thinkingStatus = 'isteği değerlendiriyor';
     this._streamed = false;
     if (this.stdout.isTTY) {
-      this._write(this._c(C.grayDim) + S.sep + ' düşünüyor…' + this._reset());
+      this._write(this._thinkingLine());
     }
+  }
+
+  thinkingStatus(text) {
+    this._thinkingStatus = String(text || '').replace(/\s+/g, ' ').trim();
+    if (this._thinking && this.stdout.isTTY) {
+      this._write('\r\x1b[2K' + this._thinkingLine());
+    }
+  }
+
+  _thinkingLine() {
+    const status = this._thinkingStatus ? ` ${this._thinkingStatus}` : '';
+    return this._c(C.grayDim) + S.sep + status + '…' + this._reset();
   }
 
   assistantDelta(text) {
@@ -176,7 +190,7 @@ class PlainPresenter {
     if (!chunk) return;
     if (this._thinking) {
       this._thinking = false;
-      if (this.color) this._write('\r\x1b[2K');
+      if (this.stdout.isTTY) this._write('\r\x1b[2K');
     }
     this._streamed = true;
     this._write(chunk);
@@ -185,7 +199,7 @@ class PlainPresenter {
   assistantDone() {
     if (this._thinking) {
       this._thinking = false;
-      if (this.color) this._write('\r\x1b[2K');
+      if (this.stdout.isTTY) this._write('\r\x1b[2K');
     }
     if (this._streamed) {
       this._streamed = false;

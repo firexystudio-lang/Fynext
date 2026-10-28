@@ -554,11 +554,19 @@ class Screen {
   beginThinking() {
     const last = this.items[this.items.length - 1];
     if (!last || last.kind !== 'assistant') {
-      this.items.push({ kind: 'assistant', text: '', thinking: true });
+      this.items.push({ kind: 'assistant', text: '', thinking: true, progress: '' });
     } else {
       last.thinking = true;
+      last.progress = '';
     }
     this._syncTimer();
+    this.scheduleRender();
+  }
+
+  thinkingStatus(text) {
+    const last = this.items[this.items.length - 1];
+    if (!last || last.kind !== 'assistant' || !last.thinking) return;
+    last.progress = sanitize(text || '');
     this.scheduleRender();
   }
 
@@ -1265,7 +1273,7 @@ class Screen {
             C.grayDim +
             '  ' +
             S.sep +
-            ' düşünüyor' +
+            (item.progress || 'düşünüyor') +
             '.'.repeat(1 + (this.thinkingTick % 3)) +
             C.reset;
         }

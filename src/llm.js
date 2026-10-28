@@ -258,6 +258,7 @@ function toolInstructions(tools) {
   return [
     '',
     'ARAC KULLANIMI:',
+    'Once kullanicinin bilgi mi istedigini, yoksa bir isi yapmani mi istedigini ayirt et. Build modunda "X yap/olustur/ekle/duzelt" gibi dogrudan isteklerde, kullanici nasil yapilacagini sormadiysa genel tavsiye verip durma; gerekli araclari cagir, sonuclari bekle ve isi gercekten tamamla. Ornegin "blog web sitesi yap" icin once fs_list ile calisma alanini incele, sonra mevcut projeye uygun dosyalari fs_write/fs_edit ile olustur veya duzenle ve sonucu dogrula. Dosya ya da kodu kullanicidan elle olusturmasini/kopyalamasini isteme.',
     'Bir arac gerekiyorsa hemen cagir. Arac cagrilarinda yalnizca asagidaki XML bicimini kullan; birden fazla arac icin birden fazla <tool> blogu yaz:',
     '<tool>',
     '  <name>arac_adi</name>',
@@ -268,7 +269,7 @@ function toolInstructions(tools) {
     'Kullanilabilir araclar:',
     ...lines,
     '',
-    'Arac sonucunu aldiktan sonra onu incele ve kullaniciya gorevi tamamlayan yaniti ver. Sonucu uydurma.'
+    'Arac sonucunu aldiktan sonra onu incele ve kullaniciya gorevi tamamlayan yaniti ver. Sonucu uydurma; kullaniciya uzun ic dusunce dokumu verme.'
   ].join('\n');
 }
 

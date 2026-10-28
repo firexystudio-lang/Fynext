@@ -8,9 +8,11 @@ const { loadConfig, loadSystemPrompt, saveSettingsPatch } = require('./src/confi
 const llm = require('./src/llm');
 const tools = require('./src/tools');
 const setup = require('./src/setup');
+const projectContext = require('./src/project-context');
 const { Screen, sanitize } = require('./src/screen');
 const { PlainPresenter } = require('./src/plain');
 const chatHistory = require('./src/chat-history');
+const { requiresToolFollowThrough } = require('./src/task-intent');
 
 const MAX_CALLS = 30;
 
@@ -21,6 +23,10 @@ const COMMAND_HELP = [
   '  /modeller, /models      Yerel Ollama modellerini seç',
   '  /usage                  Oturum token kullanımını göster',
   '  /araçlar, /tools        Kullanılabilir araçları listele',
+  '  /project, /proje        Proje hafızasını ve özetini göster',
+  '  /memory, /hafıza        Proje hafızasını yenile ve göster',
+  '  /git, /status           Git durumunu ve son değişiklikleri göster',
+  '  /review, /incele        Olası riskleri hızlıca denetle',
   '  /plan                   Plan moduna geç (salt okunur; düzeltme önerir)',
   '  /build                  Build moduna geç (cihaz erişimi)',
   '  /mode                   Geçerli modu göster',
@@ -227,6 +233,7 @@ function startStartupSplash(stdout) {
 }
 
 function buildSystemPrompt(cfg, base, mode) {
+  const projectMemory = cfg.projectContext ? projectContext.buildProjectMemoryText(cfg.projectContext) : 'Proje hafızası henüz oluşturulmadı.';
   const env = [
     '',
     'ORTAM:',
@@ -239,9 +246,11 @@ function buildSystemPrompt(cfg, base, mode) {
     `- Onay: ${cfg.approveDestructive ? 'açık' : 'kapalı'}`,
     `- Çalışma alanı dışı erişim: ${cfg.allowOutsideWorkspace ? 'açık' : 'kapalı'}`,
     '- Dosya yollarında mümkün olduğunda çalışma alanına göreli yollar kullan.',
+    'PROJE HAFIZASI:',
+    projectMemory,
     mode === 'plan'
       ? '- PLAN modunda incele ve oner; degisiklik yapma.'
-      : '- BUILD modunda islemleri gercekten yap; sadece anlatma. Sonucu kisa bicimde ozetle.',
+      : '- BUILD modunda kullanicinin istedigi kod ve dosya islemlerini araclari kullanarak gercekten tamamla; nasil yapilacagini tarif edip birakma.',
     ...(mode === 'plan'
       ? [
           '- PLAN modunda hiçbir dosya oluşturma, yazma, düzenleme, silme veya taşıma; hata düzeltmelerini yalnızca uygulanabilir öneri olarak sun.',
@@ -250,10 +259,15 @@ function buildSystemPrompt(cfg, base, mode) {
       : []),
     ...(mode === 'build'
       ? [
+          '- Kullanici kod yazmani, dosya olusturmani veya projeyi degistirmeni istiyorsa, kullanicidan dosyayi kendisinin olusturmasini ya da kodu elle kopyalamasini ASLA isteme. Uygun dosya yolunu projeyi inceleyerek sec ve fs_write/fs_edit araclariyla kendin uygula.',
+          '- Her istekte once kullanicinin bilgi mi istedigini, yoksa bir isi uygulamani mi istedigini ayirt et. "X yap/olustur/ekle/duzelt" gibi uygulama isteklerini genel nasil-yapilir cevabina cevirme.',
+          '- Ornek: "Blog web sitesi yap" denirse hosting veya HTML hakkinda tavsiye verip durma. Once fs_list ile calisma alanini incele; mevcut yapiya uy. Proje bossa kucuk, calisir ve mobil uyumlu bir blog baslangici olusturmak icin fs_write araclarini kullan; sonra dosyalari dogrula.',
+          '- Arac gerektiren bir istege, araci cagirip sonucunu almadan yalnizca nasil yapilacagini anlatarak veya tamamlanmis gibi yanit vererek sonlandirma.',
+          '- Yeni dosya icin fs_write kullan; ust klasorler otomatik olusturulur. Var olan dosyayi ezmek onay gerektiriyorsa onay iste ve sonucu bekle.',
           '- Dosya veya kodla ilgili bir görevde dosya içeriğini tahmin etme; dosya araçlarını kullan.',
           '- Önce fs_list veya fs_glob ile ilgili dosyayı bul, sonra fs_read ile içeriğini oku.',
-          '- Yeni dosya oluşturmak veya dosyayı değiştirmek için fs_write ya da fs_edit kullan; araç onay bekliyorsa kullanıcı yanıtını bekle.',
-          '- Değişiklikten sonra fs_read ile sonucu doğrula. Araç hata verirse hatayı açıkça bildir; yapılmamış işi tamamlanmış gibi gösterme.',
+          '- Uygula, ardından fs_read veya uygun salt-okunur komutla degisikligi dogrula. Uygun test/build/lint varsa calistir.',
+          '- Arac hata verirse hatayi acikca bildir; yapilmamis isi tamamlanmis gibi gosterme.',
           '- Dosya aracı yollarını çalışma alanına göreli ver; çalışma alanının kökünü listelemek için fs_list yolunu "." kullan.'
         ]
       : [])
@@ -318,6 +332,11 @@ async function main() {
   if (startupSplash) startupSplash();
 
   let systemPromptBase = loadSystemPrompt(cfg);
+  try {
+    cfg.projectContext = projectContext.refreshProjectMemory(cfg);
+  } catch (_) {
+    cfg.projectContext = projectContext.readProjectMemory(cfg);
+  }
   let mode = 'build';
   const sessionUsage = {
     promptTokens: 0,
@@ -402,6 +421,7 @@ async function main() {
   });
 
   function refreshSystem() {
+    cfg.projectContext = cfg.projectContext || projectContext.readProjectMemory(cfg);
     systemPrompt = buildSystemPrompt(cfg, systemPromptBase, mode);
     messages[0] = { role: 'system', content: systemPrompt };
   }
@@ -448,6 +468,19 @@ async function main() {
     });
   }
 
+  function setThinkingStatus(status) {
+    if (typeof presenter.thinkingStatus === 'function') presenter.thinkingStatus(status);
+  }
+
+  function toolProgress(name) {
+    if (['fs_list', 'fs_read', 'fs_glob', 'fs_grep'].includes(name)) return 'Dosyaları inceliyor';
+    if (['fs_write', 'fs_edit', 'fs_delete', 'fs_move', 'fs_mkdir'].includes(name)) return 'Dosyaları güncelliyor';
+    if (name === 'shell_exec') return 'Komutu çalıştırıyor';
+    if (name.startsWith('git_')) return 'Git bilgilerini inceliyor';
+    if (name === 'web_search' || name === 'web_fetch') return 'Web’de araştırıyor';
+    return 'İlgili işlemi yürütüyor';
+  }
+
   if (typeof presenter.modeHandler === 'function') {
     presenter.modeHandler(() => switchMode(mode === 'build' ? 'plan' : 'build'));
   }
@@ -455,12 +488,12 @@ async function main() {
     presenter.newConversationHandler(startNewConversation);
   }
 
-  async function chatWithUsage(history, availableTools) {
+  async function chatWithUsage(history, availableTools, showDeltas = true) {
     let streamedChars = 0;
     const startedAt = Date.now();
     const result = await llm.chat(cfg, history, availableTools, (delta) => {
       streamedChars += String(delta).length;
-      presenter.assistantDelta(delta);
+      if (showDeltas) presenter.assistantDelta(delta);
       const liveTokens = Math.ceil(streamedChars / 4);
       const liveRate = Math.round(liveTokens * 60000 / Math.max(1, Date.now() - startedAt));
       const completedTokens = sessionUsage.promptTokens + sessionUsage.outputTokens;
@@ -483,17 +516,32 @@ async function main() {
   async function runAgent() {
     activeController = new AbortController();
     cfg.abortSignal = activeController.signal;
+    const currentRequest = messages[messages.length - 1];
+    const requiresTools = mode === 'build' &&
+      currentRequest &&
+      currentRequest.role === 'user' &&
+      requiresToolFollowThrough(currentRequest.content);
     const seen = new Map();
     let totalCalls = 0;
     let rounds = 0;
+    let toolRetries = 0;
+    let executedTool = false;
+    let retryHistory = null;
 
     try {
       for (;;) {
         rounds += 1;
         presenter.beginThinking();
+        setThinkingStatus(rounds === 1
+          ? 'İsteği ve proje bağlamını değerlendiriyor'
+          : 'Araç sonuçlarını değerlendirip sonraki adımı belirliyor');
         let out;
         try {
-          out = await chatWithUsage(messages, tools.definitionsForMode(mode));
+          out = await chatWithUsage(
+            retryHistory || messages,
+            tools.definitionsForMode(mode),
+            !requiresTools || executedTool
+          );
         } catch (err) {
           presenter.assistantDone();
           throw err;
@@ -508,17 +556,42 @@ async function main() {
         if (process.env.FYNEXT_DEBUG) {
           process.stderr.write(`[debug] tur ${rounds} calls ${JSON.stringify(calls)}\n`);
         }
-        if (content || calls.length) {
-          const message = { role: 'assistant', content: calls.length ? '' : content };
-          if (calls.length) {
-            message.tool_calls = calls.map((call) => ({
-              id: call.id,
-              function: { name: call.name, arguments: call.arguments }
-            }));
-          }
+        if (calls.length) {
+          retryHistory = null;
+          const message = { role: 'assistant', content: '' };
+          message.tool_calls = calls.map((call) => ({
+            id: call.id,
+            function: { name: call.name, arguments: call.arguments }
+          }));
           messages.push(message);
         }
-        if (!calls.length) return content;
+        if (!calls.length) {
+          if (requiresTools && !executedTool) {
+            if (toolRetries < 2) {
+              toolRetries += 1;
+              const retryMessages = retryHistory || messages;
+              retryHistory = retryMessages.concat(
+                ...(content ? [{ role: 'assistant', content }] : []),
+                {
+                  role: 'user',
+                  content:
+                    '[SİSTEM] Bu bir uygulama isteği. Önceki yanıtın hiçbir araç çağrısı içermedi ve işi tamamlamadı. Mevcut araçlardan uygun olanları şimdi çağır; kod/proje görevi ise önce ilgili dosyaları incele, ardından istenen değişikliği uygula ve doğrula. Araç sonucu almadan tamamlandığını söyleme.'
+                }
+              );
+              presenter.note(
+                `araç çağrısı yapılmadı; isteği araç kullanarak tamamlama yeniden deneniyor (${toolRetries}/2)`
+              );
+              continue;
+            }
+
+            const warning =
+              'Bu uygulama isteği için iki kez yeniden denememe rağmen model araç çağrısı üretmedi. Herhangi bir araç çalıştırmadım ve değişiklik yapmadım.';
+            messages.push({ role: 'assistant', content: warning });
+            return warning;
+          }
+          if (content) messages.push({ role: 'assistant', content });
+          return content;
+        }
 
         let overLimit = false;
         const roundSeen = new Set();
@@ -562,12 +635,15 @@ async function main() {
             continue;
           }
 
+          setThinkingStatus(toolProgress(call.name));
           presenter.toolStart(call.name, call.arguments);
           let resultText;
           let ok = true;
           try {
             resultText = await tools.run(cfg, call.name, call.arguments, mode);
+            executedTool = true;
           } catch (err) {
+            executedTool = true;
             ok = false;
             resultText = 'HATA: ' + (err && err.message ? err.message : String(err));
           }
@@ -591,6 +667,7 @@ async function main() {
       }
 
       presenter.beginThinking();
+      setThinkingStatus('Son yanıtı hazırlıyor');
       const guard = {
         role: 'user',
         content:
@@ -735,6 +812,51 @@ async function main() {
       refreshSystem();
       presenter.setInfo({ model: cfg.model });
       presenter.note(`model: ${cfg.model}`);
+      return;
+    }
+
+    if (['project', 'proje', 'memory', 'hafıza'].includes(cmd)) {
+      try {
+        cfg.projectContext = projectContext.refreshProjectMemory(cfg);
+      } catch (_) {
+        cfg.projectContext = projectContext.readProjectMemory(cfg);
+      }
+      refreshSystem();
+      presenter.note(projectContext.buildProjectMemoryText(cfg.projectContext));
+      return;
+    }
+
+    if (['git', 'status', 'değişiklikler', 'degisiklikler'].includes(cmd)) {
+      try {
+        cfg.projectContext = projectContext.refreshProjectMemory(cfg);
+      } catch (_) {
+        cfg.projectContext = projectContext.readProjectMemory(cfg);
+      }
+      const gitInfo = cfg.projectContext.git || {};
+      const lines = [
+        `dal: ${gitInfo.branch || 'bilinmiyor'}`,
+        `durum: ${gitInfo.status || 'git bilgisi yok'}`
+      ];
+      if (Array.isArray(gitInfo.recentCommits) && gitInfo.recentCommits.length) {
+        lines.push('son commitler:');
+        lines.push(...gitInfo.recentCommits.slice(0, 5).map((entry) => `  ${entry}`));
+      }
+      presenter.note(lines.join('\n'));
+      return;
+    }
+
+    if (['review', 'incele', 'audit'].includes(cmd)) {
+      try {
+        cfg.projectContext = projectContext.refreshProjectMemory(cfg);
+      } catch (_) {
+        cfg.projectContext = projectContext.readProjectMemory(cfg);
+      }
+      const issues = projectContext.reviewProject(cfg, cfg.projectContext);
+      if (!issues.length) {
+        presenter.note('İnceleme sonucu: belirgin risk veya teknik borç bulunamadı.');
+        return;
+      }
+      presenter.note(['Olası riskler:', ...issues.map((issue) => `- ${issue}`)].join('\n'));
       return;
     }
 
