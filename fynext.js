@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 const pkg = require('./package.json');
 const { loadConfig, loadSystemPrompt, saveSettingsPatch } = require('./src/config');
 const llm = require('./src/llm');
@@ -14,6 +15,7 @@ const { PlainPresenter } = require('./src/plain');
 const chatHistory = require('./src/chat-history');
 const { requiresToolFollowThrough } = require('./src/task-intent');
 const featureRoadmap = require('./src/feature-roadmap');
+const { PROVIDERS } = require('./src/api-providers');
 
 const MAX_CALLS = 30;
 
@@ -70,6 +72,7 @@ const FLAG_HELP = [
   '',
   'Seçenekler:',
   '  --model <ad>          Model adı (varsayılan: qwen2.5-coder:3b)',
+  '  --ms                  37 API sağlayıcısı/endpointinden seçip anahtar iste',
   '  --workspace, -w <yol> Çalışma alanı',
   '  --plain               Tam ekran arayüz yerine düz terminal',
   '  --prompt <metin>      Tek seferlik görev çalıştır',
@@ -97,6 +100,7 @@ function parseArgs(argv) {
     help: false,
     version: false,
     plain: false,
+    apiMode: false,
     prompt: null,
     model: null,
     workspace: null,
@@ -125,6 +129,9 @@ function parseArgs(argv) {
       case '--plain':
       case '--no-tui':
         flags.plain = true;
+        break;
+      case '--ms':
+        flags.apiMode = true;
         break;
       case '--prompt':
         if (value == null) value = argv[++i];
@@ -192,6 +199,81 @@ async function readStdin() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
   return Buffer.concat(chunks).toString('utf8');
+}
+
+async function promptLine(question) {
+  if (!process.stdin.isTTY) {
+    throw new Error('Etkileşimsiz kullanımda FYNEXT_PROVIDER (veya OPENAI_BASE_URL), OPENAI_MODEL ve FYNEXT_API_KEY ayarlayın.');
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await new Promise((resolve) => rl.question(question, resolve));
+  } finally {
+    rl.close();
+  }
+}
+
+async function selectApiSettings(flags) {
+  let provider = null;
+  const baseOverride = process.env.OPENAI_BASE_URL;
+  if (!baseOverride) {
+    const requested = String(process.env.FYNEXT_PROVIDER || '').trim().toLowerCase();
+    provider = PROVIDERS.find((item) => item.id === requested);
+    if (requested && !provider) throw new Error(`Bilinmeyen FYNEXT_PROVIDER: ${requested}`);
+    if (!provider) {
+      const choices = PROVIDERS.map((item, index) => `${String(index + 1).padStart(2, ' ')}. ${item.name}`).join('\n');
+      const answer = await promptLine(`API sağlayıcısı seç (1-${PROVIDERS.length}; özel adres için 0):\n${choices}\nSeçim: `);
+      const choice = Number(answer.trim());
+      if (!Number.isInteger(choice) || choice < 0 || choice > PROVIDERS.length) {
+        throw new Error('Geçersiz API sağlayıcısı seçimi.');
+      }
+      if (choice > 0) provider = PROVIDERS[choice - 1];
+    }
+  }
+
+  let apiBaseUrl = baseOverride || (provider && provider.baseUrl);
+  if (!apiBaseUrl) apiBaseUrl = (await promptLine('OpenAI uyumlu API adresi: ')).trim();
+  apiBaseUrl = apiBaseUrl.replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(apiBaseUrl)) throw new Error('API adresi http:// veya https:// ile başlamalı.');
+
+  const model = flags.model || process.env.OPENAI_MODEL ||
+    (await promptLine('Model adı/ID: ')).trim();
+  if (!model) throw new Error('API model adı boş olamaz.');
+  return { apiBaseUrl, model, provider: provider ? provider.id : 'custom' };
+}
+
+async function promptApiKey() {
+  const envKey = process.env.FYNEXT_API_KEY || process.env.OPENAI_API_KEY;
+  if (envKey) return envKey.trim();
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function') {
+    throw new Error('--ms için FYNEXT_API_KEY veya OPENAI_API_KEY ayarlayın ya da etkileşimli terminalde çalıştırın.');
+  }
+  process.stdout.write('API anahtarı: ');
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  return new Promise((resolve, reject) => {
+    let key = '';
+    const finish = (err) => {
+      process.stdin.removeListener('data', onData);
+      process.stdin.setRawMode(false);
+      process.stdout.write('\n');
+      if (err) reject(err);
+      else resolve(key.trim());
+    };
+    const onData = (chunk) => {
+      for (const char of String(chunk)) {
+        if (char === '\u0003') return finish(new Error('API anahtarı girişi iptal edildi.'));
+        if (char === '\r' || char === '\n') return finish();
+        if (char === '\u007f' || char === '\b') {
+          if (key.length) { key = key.slice(0, -1); process.stdout.write('\b \b'); }
+        } else if (char >= ' ') {
+          key += char;
+          process.stdout.write('*');
+        }
+      }
+    };
+    process.stdin.on('data', onData);
+  });
 }
 
 function startStartupSplash(stdout) {
@@ -282,6 +364,15 @@ async function main() {
   if (!flags.color) process.env.NO_COLOR = '1';
 
   const cfg = loadConfig();
+  if (flags.apiMode) {
+    const apiSettings = await selectApiSettings(flags);
+    cfg.apiMode = true;
+    cfg.apiKey = await promptApiKey();
+    if (!cfg.apiKey) throw new Error('API anahtarı boş olamaz.');
+    cfg.apiBaseUrl = apiSettings.apiBaseUrl;
+    cfg.apiProvider = apiSettings.provider;
+    cfg.model = apiSettings.model;
+  }
   if (flags.model) cfg.model = flags.model;
   if (flags.workspace) cfg.workspace = path.resolve(flags.workspace);
   if (flags.restricted) {
@@ -311,10 +402,12 @@ async function main() {
     ? (startupSplash ? () => {} : (line) => process.stdout.write(line + '\n'))
     : (line) => process.stderr.write(line + '\n');
   try {
-    await setup.ensureReady(cfg, {
-      tty: uiMode && !!process.stdout.isTTY && !startupSplash,
-      log: setupLog
-    });
+    if (!cfg.apiMode) {
+      await setup.ensureReady(cfg, {
+        tty: uiMode && !!process.stdout.isTTY && !startupSplash,
+        log: setupLog
+      });
+    }
   } catch (err) {
     if (startupSplash) startupSplash();
     process.stderr.write(`fynext: ${err.message}\n`);
@@ -683,6 +776,7 @@ async function main() {
   }
 
   async function installModel(name) {
+    if (cfg.apiMode) return true;
     const list = await llm.listModels(cfg);
     if (setup.hasModel(list, name)) return true;
     presenter.setBusy(true);
@@ -797,14 +891,14 @@ async function main() {
         }
         if (typeof presenter.selectOption === 'function') {
           requestedModel = await presenter.selectOption(
-            'Yerel Ollama modeli seç',
+            cfg.apiMode ? 'API modeli seç' : 'Yerel Ollama modeli seç',
             availableModels,
             cfg.model
           );
           if (!requestedModel) return;
         } else {
           commandNote(
-            `Yerel modeller:\n${availableModels.map((name) => `${name === cfg.model ? '* ' : '  '}${name}`).join('\n')}\nSeçmek için /model <ad> yaz.`
+            `${cfg.apiMode ? 'API modelleri' : 'Yerel modeller'}:\n${availableModels.map((name) => `${name === cfg.model ? '* ' : '  '}${name}`).join('\n')}\nSeçmek için /model <ad> yaz.`
           );
           return;
         }
@@ -812,7 +906,7 @@ async function main() {
       const installed = await installModel(requestedModel);
       if (!installed) return;
       cfg.model = requestedModel;
-      saveSettingsPatch({ model: cfg.model });
+      if (!cfg.apiMode) saveSettingsPatch({ model: cfg.model });
       refreshSystem();
       presenter.setInfo({ model: cfg.model });
       commandNote(`model: ${cfg.model}`);

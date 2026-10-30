@@ -39,6 +39,10 @@ It is an open-source solution that runs securely on your computer.
 | **Fast Processing** | Runs fast thanks to optimized performance. |
 | **Targeted Solutions** | Customizable for specific tasks. |
 
+## API mode
+
+Run `fynext --ms` to choose from 37 presets: 30 hosted API providers and seven local API servers. Fynext asks for the model ID and API key; the key is hidden while typing and is not saved. Choose `0` for a custom OpenAI-compatible endpoint. Provider model IDs and tool support vary. In non-interactive use, set `FYNEXT_PROVIDER` (or `OPENAI_BASE_URL`), `OPENAI_MODEL`, and `FYNEXT_API_KEY`. API mode also works in Termux with Node.js 18 or later.
+
 ## Possible Additions
 
 Fynext can be extended in several useful directions to make it more powerful for everyday development workflows:

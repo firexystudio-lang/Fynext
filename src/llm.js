@@ -299,6 +299,7 @@ function withToolInstructions(messages, tools) {
 }
 
 async function modelSupportsTools(cfg) {
+  if (cfg.apiMode) return true;
   const key = cfg.model;
   if (toolSupportCache.has(key)) return toolSupportCache.get(key);
   let supported = false;
@@ -404,6 +405,7 @@ async function doRequest(cfg, messages, tools, signal) {
 }
 
 async function chat(cfg, messages, tools, onDelta) {
+  if (cfg.apiMode) return chatApi(cfg, messages, tools, onDelta);
   const validNames = toolNamesOf(tools);
   const timeoutSignal = AbortSignal.timeout(Math.max(180, Number(cfg.requestTimeoutSec) * 60) * 1000);
   const signal = cfg.abortSignal ? AbortSignal.any([timeoutSignal, cfg.abortSignal]) : timeoutSignal;
@@ -506,7 +508,105 @@ async function chat(cfg, messages, tools, onDelta) {
   return { content, toolCalls: [], stats };
 }
 
+async function chatApi(cfg, messages, tools, onDelta) {
+  const startedAt = Date.now();
+  const url = String(cfg.apiBaseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '') + '/chat/completions';
+  const body = {
+    model: cfg.model,
+    messages: trimMessages(cfg, messages).map((message) => {
+      const copy = { ...message };
+      delete copy.tool_name;
+      if (Array.isArray(copy.tool_calls)) {
+        copy.tool_calls = copy.tool_calls.map((call) => ({
+          ...call,
+          function: {
+            ...call.function,
+            arguments: typeof call.function.arguments === 'string'
+              ? call.function.arguments
+              : JSON.stringify(call.function.arguments || {})
+          }
+        }));
+      }
+      return copy;
+    }),
+    stream: true,
+    temperature: Number(cfg.temperature),
+    max_tokens: Math.max(256, Number(cfg.maxNewTokens) || 2048)
+  };
+  if (tools && tools.length) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+  }
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cfg.apiKey}`
+      },
+      body: JSON.stringify(body),
+      signal: cfg.abortSignal
+        ? AbortSignal.any([AbortSignal.timeout(Math.max(180, Number(cfg.requestTimeoutSec) * 60) * 1000), cfg.abortSignal])
+        : AbortSignal.timeout(Math.max(180, Number(cfg.requestTimeoutSec) * 60) * 1000)
+    });
+  } catch (err) {
+    if (cfg.abortSignal && cfg.abortSignal.aborted) throw new Error('İstek iptal edildi.');
+    if (err.name === 'TimeoutError') throw new Error('API yanıt zaman aşımına uğradı.');
+    throw new Error(`API sunucusuna bağlanılamadı (${url}): ${err.message}`);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`API HTTP ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  let content = '';
+  const toolParts = new Map();
+  const stats = {};
+  for await (const line of readLines(response.body)) {
+    if (!line.startsWith('data:')) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    let event;
+    try { event = JSON.parse(data); } catch (_) { continue; }
+    if (event.error) throw new Error(event.error.message || 'API isteği başarısız oldu.');
+    if (event.usage) {
+      stats.promptTokens = event.usage.prompt_tokens;
+      stats.outputTokens = event.usage.completion_tokens;
+    }
+    const delta = event.choices && event.choices[0] && event.choices[0].delta;
+    if (!delta) continue;
+    if (typeof delta.content === 'string') {
+      content += delta.content;
+      if (onDelta) onDelta(delta.content);
+    }
+    for (const part of delta.tool_calls || []) {
+      const index = Number(part.index) || 0;
+      const tool = toolParts.get(index) || { id: '', name: '', arguments: '' };
+      if (part.id) tool.id += part.id;
+      if (part.function && part.function.name) tool.name += part.function.name;
+      if (part.function && part.function.arguments) tool.arguments += part.function.arguments;
+      toolParts.set(index, tool);
+    }
+  }
+  const validNames = toolNamesOf(tools);
+  const toolCalls = [...toolParts.values()].map((part) => {
+    let args = {};
+    try { args = JSON.parse(part.arguments || '{}'); } catch (_) { return null; }
+    if (!part.name || (validNames.length && !validNames.includes(part.name))) return null;
+    return { id: part.id, name: part.name, arguments: normalizeArgs(args) };
+  }).filter(Boolean);
+  stats.totalMs = Date.now() - startedAt;
+  stats.model = cfg.model;
+  if (stats.outputTokens && stats.totalMs > 0) {
+    stats.tokensPerMinute = Math.round((stats.outputTokens * 60000) / stats.totalMs);
+  }
+  return { content, toolCalls, stats };
+}
+
 async function listModels(cfg) {
+  if (cfg.apiMode) return [cfg.model];
   try {
     const res = await fetch(cfg.ollamaUrl.replace(/\/$/, '') + '/api/tags', {
       signal: AbortSignal.timeout(8000)
@@ -526,6 +626,7 @@ async function listAvailableModels(cfg) {
 }
 
 async function warmup(cfg) {
+  if (cfg.apiMode) return false;
   try {
     const res = await fetch(cfg.ollamaUrl.replace(/\/$/, '') + '/api/generate', {
       method: 'POST',
