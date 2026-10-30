@@ -254,35 +254,36 @@ function toolNamesOf(tools) {
 }
 
 function toolInstructions(tools) {
-  const lines = tools.map((t) => {
-    const fn = t.function || t;
+  const lines = tools.map((tool) => {
+    const fn = tool.function || tool;
     const props = (fn.parameters && fn.parameters.properties) || {};
     const params = Object.keys(props)
-      .map((k) => {
-        const detail = props[k].description ? ` - ${props[k].description}` : '';
-        return `  - ${k} (${props[k].type || 'any'})${detail}`;
+      .map((key) => {
+        const detail = props[key].description ? ` - ${props[key].description}` : '';
+        return `  - ${key} (${props[key].type || 'any'})${detail}`;
       })
       .join(', ');
-    return `- ${fn.name}: ${fn.description || 'Aciklama yok.'}\n${params}`;
+    return `- ${fn.name}: ${fn.description || 'No description.'}\n${params}`;
   });
   return [
     '',
-    'ARAC KULLANIMI:',
-    'Once kullanicinin bilgi mi istedigini, yoksa bir isi yapmani mi istedigini ayirt et. Build modunda "X yap/olustur/ekle/duzelt" gibi dogrudan isteklerde, kullanici nasil yapilacagini sormadiysa genel tavsiye verip durma; gerekli araclari cagir, sonuclari bekle ve isi gercekten tamamla. Ornegin "blog web sitesi yap" icin once fs_list ile calisma alanini incele, sonra mevcut projeye uygun dosyalari fs_write/fs_edit ile olustur veya duzenle ve sonucu dogrula. Dosya ya da kodu kullanicidan elle olusturmasini/kopyalamasini isteme.',
-    'Bir arac gerekiyorsa hemen cagir. Arac cagrilarinda yalnizca asagidaki XML bicimini kullan; birden fazla arac icin birden fazla <tool> blogu yaz:',
+    'TOOL POLICY:',
+    'When the user asks about this repository or its code (including inspection, review, analysis, debugging, or recommendations), inspect relevant files with tools before answering.',
+    'In BUILD mode, carry out requested work. Do not answer an actionable project request with suggestions, a tutorial, or a request for the user to provide files that are already in the workspace.',
+    'Use the smallest useful sequence: locate relevant files, read them, act if requested, then verify. Do not modify files in PLAN mode.',
+    'If a tool is needed, call it now. Use only this XML call format, with one block per call and no surrounding prose:',
     '<tool>',
-    '  <name>arac_adi</name>',
-    '  <arguments>{"parametre":"deger"}</arguments>',
+    '  <name>tool_name</name>',
+    '  <arguments>{"parameter":"value"}</arguments>',
     '</tool>',
-    'XML blogunun disina aciklama veya markdown ekleme. JSON degerlerini XML icinde JSON olarak ver ve XML ozel karakterlerini kacir. Arac gerekmiyorsa normal yanit ver.',
+    'Escape XML special characters in argument values. Use valid JSON inside arguments. Do not invent tool names or claim a tool ran when it did not.',
     '',
-    'Kullanilabilir araclar:',
+    'AVAILABLE TOOLS:',
     ...lines,
     '',
-    'Arac sonucunu aldiktan sonra onu incele ve kullaniciya gorevi tamamlayan yaniti ver. Sonucu uydurma; kullaniciya uzun ic dusunce dokumu verme.'
+    'After receiving tool results, use them to finish the task and report only verified findings or changes. Keep the final answer concise and in the user\'s language.'
   ].join('\n');
 }
-
 function withToolInstructions(messages, tools) {
   const instr = toolInstructions(tools);
   let injected = false;

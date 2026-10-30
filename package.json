@@ -15,7 +15,8 @@
     "changes.txt"
   ],
   "scripts": {
-    "start": "node fynext.js"
+    "start": "node fynext.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

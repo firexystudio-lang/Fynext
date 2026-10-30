@@ -88,11 +88,11 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_list',
-      description: 'Bir dizindeki dosya ve klasorleri listeler.',
+      description: 'List files and folders in a directory.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Dizin yolu (workspace goreli veya mutlak). Varsayilan: .' }
+          path: { type: 'string', description: 'Directory path, relative to the workspace or absolute. Defaults to .' }
         },
         required: ['path']
       }
@@ -102,13 +102,13 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_read',
-      description: 'Bir dosyayi okur. Istege bagli satir araligi verilebilir.',
+      description: 'Read a file, optionally limited to a line range.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Dosya yolu' },
-          start_line: { type: 'number', description: 'Baslangic satiri (1 tabanli)' },
-          end_line: { type: 'number', description: 'Bitis satiri' }
+          path: { type: 'string', description: 'File path' },
+          start_line: { type: 'number', description: 'Starting line (1-based)' },
+          end_line: { type: 'number', description: 'Ending line' }
         },
         required: ['path']
       }
@@ -118,13 +118,13 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_write',
-      description: 'Dosya olusturur veya uzerine yazar. append=true ise sonuna ekler.',
+      description: 'Create a file or overwrite it. Set append=true to add content to the end.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Dosya yolu' },
-          content: { type: 'string', description: 'Yazilacak icerik' },
-          append: { type: 'boolean', description: 'true ise dosya sonuna ekler' }
+          path: { type: 'string', description: 'File path' },
+          content: { type: 'string', description: 'Content to write' },
+          append: { type: 'boolean', description: 'Append to the file when true' }
         },
         required: ['path', 'content']
       }
@@ -134,12 +134,12 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_delete',
-      description: 'Dosya siler. recursive=true ise klasoru icerigiyle siler.',
+      description: 'Delete a file. Set recursive=true to delete a directory and its contents.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Silinecek yol' },
-          recursive: { type: 'boolean', description: 'Klasoru icerigiyle sil' }
+          path: { type: 'string', description: 'Path to delete' },
+          recursive: { type: 'boolean', description: 'Recursively delete the directory' }
         },
         required: ['path']
       }
@@ -149,12 +149,12 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_move',
-      description: 'Dosya veya klasoru tasir / yeniden adlandirir.',
+      description: 'Move or rename a file or directory.',
       parameters: {
         type: 'object',
         properties: {
-          source: { type: 'string', description: 'Kaynak yol' },
-          destination: { type: 'string', description: 'Hedef yol' }
+          source: { type: 'string', description: 'Source path' },
+          destination: { type: 'string', description: 'Destination path' }
         },
         required: ['source', 'destination']
       }
@@ -164,10 +164,10 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_mkdir',
-      description: 'Klasor olusturur (ust klasorlerle birlikte).',
+      description: 'Create a directory, including missing parent directories.',
       parameters: {
         type: 'object',
-        properties: { path: { type: 'string', description: 'Klasor yolu' } },
+        properties: { path: { type: 'string', description: 'Directory path' } },
         required: ['path']
       }
     }
@@ -177,13 +177,13 @@ const definitions = [
     function: {
       name: 'shell_exec',
       description:
-        'Windows cmd.exe uzerinde komut calistirir ve ciktiyi dondurur. UTF-8 kod sayfasi otomatik ayarlanir. PLAN modunda salt-okunur komutlarla sinirlidir; BUILD modunda tam yetkilidir.',
+        'Run a shell command and return its output. PLAN mode permits read-only commands; BUILD mode permits the available command set.',
       parameters: {
         type: 'object',
         properties: {
-          command: { type: 'string', description: 'Calistirilacak komut' },
-          cwd: { type: 'string', description: 'Calisma dizini (istege bagli)' },
-          timeout_sec: { type: 'number', description: 'Zaman asimi saniye, varsayilan 60' }
+          command: { type: 'string', description: 'Command to run' },
+          cwd: { type: 'string', description: 'Working directory (optional)' },
+          timeout_sec: { type: 'number', description: 'Timeout in seconds; defaults to 60' }
         },
         required: ['command']
       }
@@ -193,12 +193,12 @@ const definitions = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: 'Internette arama yapar; baslik, url ve ozet listesi dondurur.',
+      description: 'Search the web and return titles, URLs, and snippets.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Arama sorgusu' },
-          max_results: { type: 'number', description: 'En fazla sonuc (varsayilan 6)' }
+          query: { type: 'string', description: 'Search query' },
+          max_results: { type: 'number', description: 'Maximum results; defaults to 6' }
         },
         required: ['query']
       }
@@ -208,12 +208,12 @@ const definitions = [
     type: 'function',
     function: {
       name: 'web_fetch',
-      description: 'Bir web sayfasini indirir ve metne cevirip dondurur.',
+      description: 'Fetch a web page and return its text.',
       parameters: {
         type: 'object',
         properties: {
-          url: { type: 'string', description: 'Sayfa adresi' },
-          max_chars: { type: 'number', description: 'En fazla karakter' }
+          url: { type: 'string', description: 'Page URL' },
+          max_chars: { type: 'number', description: 'Maximum characters to return' }
         },
         required: ['url']
       }
@@ -223,13 +223,13 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_edit',
-      description: 'Dosyada arama-degistirme ile duzeltme yapar. Sadece ilk eslesme degistirilir.',
+      description: 'Replace the first matching text in a file.',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Dosya yolu' },
-          search: { type: 'string', description: 'Aranacak metin' },
-          replace: { type: 'string', description: 'Degistirilecek metin' }
+          path: { type: 'string', description: 'File path' },
+          search: { type: 'string', description: 'Text to find' },
+          replace: { type: 'string', description: 'Replacement text' }
         },
         required: ['path', 'search', 'replace']
       }
@@ -239,12 +239,12 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_glob',
-      description: 'Dosya adlarina gore glob ile arama yapar (ornegin **/*.js).',
+      description: 'Find files by glob pattern, for example **/*.js.',
       parameters: {
         type: 'object',
         properties: {
-          pattern: { type: 'string', description: 'Glob paterni' },
-          path: { type: 'string', description: 'Arama dizini (varsayilan .)' }
+          pattern: { type: 'string', description: 'Glob pattern' },
+          path: { type: 'string', description: 'Search directory; defaults to .' }
         },
         required: ['pattern']
       }
@@ -254,13 +254,13 @@ const definitions = [
     type: 'function',
     function: {
       name: 'fs_grep',
-      description: 'Dosya iceriginde metin/regex arar (node_modules/.git atlanir).',
+      description: 'Search file contents with plain text or a regular expression. Skips node_modules and .git.',
       parameters: {
         type: 'object',
         properties: {
-          pattern: { type: 'string', description: 'Aranacak regex/metin' },
-          path: { type: 'string', description: 'Arama dizini (varsayilan .)' },
-          include: { type: 'string', description: 'Dosya filtresi (ornegin *.js)' }
+          pattern: { type: 'string', description: 'Text or regular expression to find' },
+          path: { type: 'string', description: 'Search directory; defaults to .' },
+          include: { type: 'string', description: 'File filter, for example *.js' }
         },
         required: ['pattern']
       }
@@ -270,11 +270,11 @@ const definitions = [
     type: 'function',
     function: {
       name: 'git_status',
-      description: 'Git depo durumunu gosterir.',
+      description: 'Show Git repository status.',
       parameters: {
         type: 'object',
         properties: {
-          cwd: { type: 'string', description: 'Calisma dizini (istege bagli)' }
+          cwd: { type: 'string', description: 'Working directory (optional)' }
         },
         required: []
       }
@@ -284,13 +284,13 @@ const definitions = [
     type: 'function',
     function: {
       name: 'git_diff',
-      description: 'Git diff gosterir (staged/unstaged farkli parametrelerle).',
+      description: 'Show Git diff, optionally staged or limited to a path.',
       parameters: {
         type: 'object',
         properties: {
-          cwd: { type: 'string', description: 'Calisma dizini (istege bagli)' },
-          staged: { type: 'boolean', description: 'true ise staged diff' },
-          path: { type: 'string', description: 'Belirli dosya (istege bagli)' }
+          cwd: { type: 'string', description: 'Working directory (optional)' },
+          staged: { type: 'boolean', description: 'Show staged changes when true' },
+          path: { type: 'string', description: 'Specific file path (optional)' }
         },
         required: []
       }
@@ -300,12 +300,12 @@ const definitions = [
     type: 'function',
     function: {
       name: 'git_log',
-      description: 'Git commit log gosterir.',
+      description: 'Show recent Git commits.',
       parameters: {
         type: 'object',
         properties: {
-          cwd: { type: 'string', description: 'Calisma dizini (istege bagli)' },
-          count: { type: 'number', description: 'Kac commit (varsayilan 10)' }
+          cwd: { type: 'string', description: 'Working directory (optional)' },
+          count: { type: 'number', description: 'Number of commits; defaults to 10' }
         },
         required: []
       }

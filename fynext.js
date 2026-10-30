@@ -235,44 +235,34 @@ function startStartupSplash(stdout) {
 }
 
 function buildSystemPrompt(cfg, base, mode) {
-  const projectMemory = cfg.projectContext ? projectContext.buildProjectMemoryText(cfg.projectContext) : 'Proje hafızası henüz oluşturulmadı.';
+  const projectMemory = cfg.projectContext
+    ? projectContext.buildProjectMemoryText(cfg.projectContext)
+    : 'Project memory has not been generated.';
   const env = [
     '',
-    'ORTAM:',
-    `- Mod: ${mode === 'plan' ? 'PLAN (salt okunur; hata duzeltmelerini yalnizca oner, uygulama)' : `BUILD (gorevi uygula; ${cfg.approveDestructive ? 'yikici islemlerden once onay al' : 'onaylar kapali'})`}`,
-    `- Çalışma alanı: ${cfg.workspace}`,
+    'RUNTIME CONTEXT:',
+    `- Mode: ${mode === 'plan' ? 'PLAN (read only; inspect and recommend, do not modify)' : `BUILD (carry out the requested work; destructive changes ${cfg.approveDestructive ? 'require approval' : 'do not require approval'})`}`,
+    `- Workspace: ${cfg.workspace}`,
     `- Platform: ${process.platform} ${process.arch}`,
-    `- Tarih: ${new Date().toISOString()}`,
+    `- Date: ${new Date().toISOString()}`,
     `- Model: ${cfg.model}`,
-    `- Kabuk: ${process.platform === 'win32' ? 'cmd.exe' : process.env.SHELL || 'sh'}`,
-    `- Onay: ${cfg.approveDestructive ? 'açık' : 'kapalı'}`,
-    `- Çalışma alanı dışı erişim: ${cfg.allowOutsideWorkspace ? 'açık' : 'kapalı'}`,
-    '- Dosya yollarında mümkün olduğunda çalışma alanına göreli yollar kullan.',
-    'PROJE HAFIZASI:',
+    `- Shell: ${process.platform === 'win32' ? 'cmd.exe' : process.env.SHELL || 'sh'}`,
+    `- Destructive action approval: ${cfg.approveDestructive ? 'enabled' : 'disabled'}`,
+    `- Access outside workspace: ${cfg.allowOutsideWorkspace ? 'enabled' : 'disabled'}`,
+    '- Prefer workspace-relative paths for file tools.',
+    'PROJECT SNAPSHOT (possibly incomplete; verify with tools):',
     projectMemory,
     mode === 'plan'
-      ? '- PLAN modunda incele ve oner; degisiklik yapma.'
-      : '- BUILD modunda kullanicinin istedigi kod ve dosya islemlerini araclari kullanarak gercekten tamamla; nasil yapilacagini tarif edip birakma.',
+      ? '- In PLAN mode, inspect the project and return findings or a concrete plan. Do not modify files.'
+      : '- In BUILD mode, use tools to complete requested project work. Do not stop at suggestions or instructions for the user.',
     ...(mode === 'plan'
-      ? [
-          '- PLAN modunda hiçbir dosya oluşturma, yazma, düzenleme, silme veya taşıma; hata düzeltmelerini yalnızca uygulanabilir öneri olarak sun.',
-          '- PLAN modunda dosya okuma, git inceleme, web araştırması ve yalnızca salt-okunur shell komutlarını kullan. Shell komut zinciri, yönlendirme veya dosya değiştirebilecek komut çalıştırma.'
-        ]
-      : []),
-    ...(mode === 'build'
-      ? [
-          '- Kullanici kod yazmani, dosya olusturmani veya projeyi degistirmeni istiyorsa, kullanicidan dosyayi kendisinin olusturmasini ya da kodu elle kopyalamasini ASLA isteme. Uygun dosya yolunu projeyi inceleyerek sec ve fs_write/fs_edit araclariyla kendin uygula.',
-          '- Her istekte once kullanicinin bilgi mi istedigini, yoksa bir isi uygulamani mi istedigini ayirt et. "X yap/olustur/ekle/duzelt" gibi uygulama isteklerini genel nasil-yapilir cevabina cevirme.',
-          '- Ornek: "Blog web sitesi yap" denirse hosting veya HTML hakkinda tavsiye verip durma. Once fs_list ile calisma alanini incele; mevcut yapiya uy. Proje bossa kucuk, calisir ve mobil uyumlu bir blog baslangici olusturmak icin fs_write araclarini kullan; sonra dosyalari dogrula.',
-          '- Arac gerektiren bir istege, araci cagirip sonucunu almadan yalnizca nasil yapilacagini anlatarak veya tamamlanmis gibi yanit vererek sonlandirma.',
-          '- Yeni dosya icin fs_write kullan; ust klasorler otomatik olusturulur. Var olan dosyayi ezmek onay gerektiriyorsa onay iste ve sonucu bekle.',
-          '- Dosya veya kodla ilgili bir görevde dosya içeriğini tahmin etme; dosya araçlarını kullan.',
-          '- Önce fs_list veya fs_glob ile ilgili dosyayı bul, sonra fs_read ile içeriğini oku.',
-          '- Uygula, ardından fs_read veya uygun salt-okunur komutla degisikligi dogrula. Uygun test/build/lint varsa calistir.',
-          '- Arac hata verirse hatayi acikca bildir; yapilmamis isi tamamlanmis gibi gosterme.',
-          '- Dosya aracı yollarını çalışma alanına göreli ver; çalışma alanının kökünü listelemek için fs_list yolunu "." kullan.'
-        ]
-      : [])
+      ? ['- Use only read-only tools and commands. Never create, edit, delete, or move files.']
+      : [
+          '- For repository-specific analysis or recommendations, inspect the relevant project files before answering.',
+          '- For implementation requests, inspect existing conventions, make the change, read it back, and run relevant checks.',
+          '- Never ask the user to inspect or edit files that you can handle with available tools.',
+          '- Do not claim completion or verification without successful tool results.'
+        ])
   ].join('\n');
   return `${String(base || '').trim()}\n${env}`;
 }
@@ -577,7 +567,7 @@ async function main() {
                 {
                   role: 'user',
                   content:
-                    '[SİSTEM] Bu bir uygulama isteği. Önceki yanıtın hiçbir araç çağrısı içermedi ve işi tamamlamadı. Mevcut araçlardan uygun olanları şimdi çağır; kod/proje görevi ise önce ilgili dosyaları incele, ardından istenen değişikliği uygula ve doğrula. Araç sonucu almadan tamamlandığını söyleme.'
+                    'SYSTEM: This is an actionable request. Your previous response did not use any tools and did not complete the task. Call the relevant tools now. For repository work, inspect the relevant files, perform the requested work when in BUILD mode, and verify the result. Do not claim completion without tool results.'
                 }
               );
               presenter.note(
@@ -673,7 +663,7 @@ async function main() {
       const guard = {
         role: 'user',
         content:
-          '[SİSTEM] Bu turda araç çağırma. Elindeki bağlam ve araç sonuçlarına dayanarak kullanıcının isteğini gerçekten yanıtla. Kullanıcının dilini ve konuşmanın tonunu koru; doğrudan başla, gerektiği kadar ayrıntı ver ve yararlı olduğunda kısa başlıklar veya adımlar kullan. Yapılmamış bir işi tamamlandı gibi gösterme; belirsizlikleri ve doğrulanmamış noktaları açıkça belirt. Gereksiz yetenek tanıtımı, genel tavsiye ve tekrar ekleme.'
+          'SYSTEM: Do not call tools in this turn. Answer the user using the conversation and verified tool results. Follow the user\'s language and tone; be direct and concise. Clearly distinguish completed work from recommendations and unverified claims. Never say work was completed unless tool results show it.'
       };
       let final;
       try {
