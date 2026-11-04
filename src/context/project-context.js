@@ -139,7 +139,7 @@ function buildArchitectureMap(snapshot, packageInfo, workspace) {
 function readGitInfo(cfg) {
   const gitRoot = path.join(cfg.workspace, '.git');
   if (!fs.existsSync(gitRoot)) {
-    return { branch: 'not-a-git-repo', status: 'git bilgisi mevcut değil', recentCommits: [] };
+    return { branch: 'not-a-git-repo', status: 'Git information is not available', recentCommits: [] };
   }
 
   try {
@@ -150,7 +150,7 @@ function readGitInfo(cfg) {
     const status = execSync(
       `git -C "${cfg.workspace}" status --short --branch 2>NUL`,
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
-    ).trim() || 'git durumu yok';
+    ).trim() || 'No Git status';
     const recentCommits = execSync(
       `git -C "${cfg.workspace}" log --oneline -5 2>NUL`,
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
@@ -161,7 +161,7 @@ function readGitInfo(cfg) {
       recentCommits: recentCommits ? recentCommits.split(/\n+/).filter(Boolean) : []
     };
   } catch (_) {
-    return { branch: 'git-unavailable', status: 'git durumu okunamadı', recentCommits: [] };
+    return { branch: 'git-unavailable', status: 'Could not read Git status', recentCommits: [] };
   }
 }
 
@@ -208,31 +208,31 @@ function buildProjectMemoryText(memory) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([ext, count]) => `${ext}: ${count}`)
-    .join(', ') || 'bilinmiyor';
+    .join(', ') || 'unknown';
 
-  const keyFiles = (memory.keyFiles || []).slice(0, 5).join(', ') || 'yok';
-  const gitStatus = memory.git && memory.git.status ? memory.git.status.split('\n').slice(0, 3).join(' | ') : 'git bilgisi yok';
+  const keyFiles = (memory.keyFiles || []).slice(0, 5).join(', ') || 'none';
+  const gitStatus = memory.git && memory.git.status ? memory.git.status.split('\n').slice(0, 3).join(' | ') : 'no Git information';
   const recentCommits = memory.git && memory.git.recentCommits && memory.git.recentCommits.length
     ? memory.git.recentCommits.slice(0, 3).join(' | ')
-    : 'commit yok';
+    : 'no commits';
   const architecture = memory.architecture || {};
   const architectureHints = [
-    (architecture.topLevelDirs || []).length ? `dizinler: ${architecture.topLevelDirs.join(', ')}` : '',
-    (architecture.entryCandidates || []).length ? `giriş adayı: ${architecture.entryCandidates.join(', ')}` : '',
-    (architecture.testFiles || []).length ? `testler: ${architecture.testFiles.join(', ')}` : ''
-  ].filter(Boolean).join(' | ') || 'henüz belirlenmedi';
+    (architecture.topLevelDirs || []).length ? `directories: ${architecture.topLevelDirs.join(', ')}` : '',
+    (architecture.entryCandidates || []).length ? `entry candidates: ${architecture.entryCandidates.join(', ')}` : '',
+    (architecture.testFiles || []).length ? `tests: ${architecture.testFiles.join(', ')}` : ''
+  ].filter(Boolean).join(' | ') || 'not determined yet';
   const scripts = Object.entries(architecture.scripts || {}).map(([name, command]) => `${name}: ${command}`);
 
   return [
-    `- Proje: ${memory.projectName || path.basename(memory.workspace || process.cwd())}`,
-    `- Dizin: ${memory.workspace || process.cwd()}`,
-    `- Dosya sayısı: ${memory.fileCount || 0}`,
-    `- Diller: ${languageSummary}`,
-    `- Önemli dosyalar: ${keyFiles}`,
-    `- Proje yapı ipuçları (dosya adlarından, doğrula): ${architectureHints}`,
-    `- Proje komutları: ${scripts.slice(0, 8).join(' | ') || 'package script bulunamadı'}`,
+    `- Project: ${memory.projectName || path.basename(memory.workspace || process.cwd())}`,
+    `- Directory: ${memory.workspace || process.cwd()}`,
+    `- File count: ${memory.fileCount || 0}`,
+    `- Languages: ${languageSummary}`,
+    `- Important files: ${keyFiles}`,
+    `- Architecture hints (inferred from file names; verify): ${architectureHints}`,
+    `- Project commands: ${scripts.slice(0, 8).join(' | ') || 'no package scripts found'}`,
     `- Git: ${gitStatus}`,
-    `- Son commitler: ${recentCommits}`
+    `- Recent commits: ${recentCommits}`
   ].join('\n');
 }
 
@@ -240,12 +240,12 @@ function reviewProject(cfg, memory) {
   const files = (memory.fileList || []).slice(0, 120);
   const issues = [];
   const patterns = [
-    { regex: /eval\s*\(/i, label: 'eval() kullanımı' },
-    { regex: /innerHTML\s*=/i, label: 'innerHTML ataması' },
-    { regex: /document\.write\s*\(|dangerouslySetInnerHTML/i, label: 'güvenlik riskli DOM işleme' },
-    { regex: /child_process\.?exec|exec\s*\(/i, label: 'shell komutu çalıştırma' },
-    { regex: /TODO|FIXME|HACK|XXX/i, label: 'teknik borç / işaretlenmiş not' },
-    { regex: /password|secret|api[_-]?key|token/i, label: 'gizli veri veya anahtar benzeri metin' }
+    { regex: /eval\s*\(/i, label: 'eval() usage' },
+    { regex: /innerHTML\s*=/i, label: 'innerHTML assignment' },
+    { regex: /document\.write\s*\(|dangerouslySetInnerHTML/i, label: 'potentially unsafe DOM rendering' },
+    { regex: /child_process\.?exec|exec\s*\(/i, label: 'shell command execution' },
+    { regex: /TODO|FIXME|HACK|XXX/i, label: 'technical debt / flagged note' },
+    { regex: /password|secret|api[_-]?key|token/i, label: 'secret-like text' }
   ];
 
   for (const file of files) {

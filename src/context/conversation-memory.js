@@ -46,7 +46,7 @@ function build(messages) {
     const userText = compact(turn.user, Math.min(650, Math.floor(remaining * 0.6)));
     const assistantText = turn.assistant
       ? compact(turn.assistant, Math.min(420, Math.max(100, remaining - userText.length - 24)))
-      : '(yanıt henüz yok)';
+      : '(no response yet)';
     const section = `- User: ${userText}\n  Fynext: ${assistantText}`;
     if (section.length > remaining && lines.length > 5) continue;
     lines.push(section);

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "project_summary_reads_source",
+    "mode": "plan",
+    "request": "Summarize this project and explain how its main feature works.",
+    "mustExpose": ["fs_read", "fs_glob"],
+    "mustHide": ["fs_write", "fs_delete"],
+    "manualAcceptance": "Final answer reflects documentation, manifest, and implementation files; names concrete paths and does not invent behavior."
+  },
+  {
+    "id": "targeted_bug_fix",
+    "mode": "build",
+    "request": "Fix this project's login bug, then verify the change.",
+    "mustExpose": ["fs_read", "fs_grep", "fs_edit", "shell_exec"],
+    "mustHide": [],
+    "manualAcceptance": "Agent inspects relevant code, makes a focused change, runs a relevant check, and reports its real result."
+  },
+  {
+    "id": "current_external_research",
+    "mode": "plan",
+    "request": "Research the latest browser API guidance and cite the source.",
+    "mustExpose": ["web_search", "web_fetch"],
+    "mustHide": ["fs_write", "fs_delete"],
+    "manualAcceptance": "Agent searches, opens a relevant source, and attributes claims to the source URL."
+  },
+  {
+    "id": "plan_mode_read_only",
+    "mode": "plan",
+    "request": "Review this project and recommend the most important improvement.",
+    "mustExpose": ["fs_read", "fs_grep"],
+    "mustHide": ["fs_write", "fs_edit", "fs_delete", "fs_move"],
+    "manualAcceptance": "Agent bases its recommendation on inspected project files and makes no changes."
+  }
+]

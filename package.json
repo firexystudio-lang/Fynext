@@ -1,21 +1,22 @@
 {
   "name": "@mfiretech/fynext",
   "version": "1.0.0",
-  "description": "Fynext - terminal icin yerel LLM tabanli yazilim ajani",
+  "description": "Fynext - local LLM-powered coding agent for the terminal",
   "type": "commonjs",
-  "main": "fynext.js",
+  "main": "src/cli/main.js",
   "bin": {
-    "fynext": "fynext.js"
+    "fynext": "bin/fynext.js"
   },
   "files": [
-    "fynext.js",
+    "bin/",
     "src/",
     "config/",
+    "sounds/",
     "README.md",
-    "changes.txt"
+    "CHANGELOG.md"
   ],
   "scripts": {
-    "start": "node fynext.js",
+    "start": "node bin/fynext.js",
     "test": "node --test"
   },
   "engines": {

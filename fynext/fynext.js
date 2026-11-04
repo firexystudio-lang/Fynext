@@ -13,6 +13,7 @@ const { PlainPresenter } = require('./src/plain');
 const chatHistory = require('./src/chat-history');
 
 const MAX_CALLS = 30;
+const MAX_TOOL_RETRIES = 2;
 
 const COMMAND_HELP = [
   'Komutlar:',
@@ -28,7 +29,7 @@ const COMMAND_HELP = [
   '  /yenile, /reload        system_prompt.txt dosyasını yeniden yükle',
   '  /workspace [yol]        Çalışma alanını göster veya değiştir',
   '  /temp [0-2]             Sıcaklığı göster veya ayarla',
-  '  /approve on|off         İşlem onayını aç veya kapat',
+  '  /approve on|off         Ek yıkıcı işlem onayını ayarla (araç onayı hep zorunlu)',
   '  /geçmiş [numara]        Sohbet geçmişini listele veya aç',
   '  /yeni                   Yeni sohbet başlat',
   '  /temizle, /clear        Sohbeti ve ekranı temizle',
@@ -66,8 +67,8 @@ const FLAG_HELP = [
   '  --plain               Tam ekran arayüz yerine düz terminal',
   '  --prompt <metin>      Tek seferlik görev çalıştır',
   '  --restricted          Çalışma alanı dışına çıkmayı engelle, onay iste',
-  '  --approve             Yıkıcı işlemler için onay iste (varsayılan)',
-  '  --no-approve          Onay isteme',
+  '  --approve             Ek yıkıcı işlem onayı iste',
+  '  --no-approve          Ek yıkıcı onayı kapat (araç başına onay sürer)',
   '  --no-color            Renkleri kapat',
   '  --help, -h            Bu yardımı göster',
   '  --version, -v         Sürümü göster',
@@ -160,6 +161,28 @@ function summarize(text, max) {
   return value.length > limit ? value.slice(0, limit) + '…' : value;
 }
 
+function normalizeRequest(text) {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u0131\u0130]/g, 'i')
+    .toLowerCase()
+    .trim();
+}
+
+function requiresToolFollowThrough(text) {
+  const request = normalizeRequest(text);
+  const workspaceReference =
+    /\b(?:this|these|my|our|the)\s+(?:project|repo|repository|workspace|codebase|code|files?|tests?|bug|error|app|application)\b|\b(?:bu|su|mevcut|acik)\s+(?:proje|repo|kod|dosya|test|hata|uygulama)\w*|\bfynext\w*/;
+  const codeScope =
+    /\b(?:code|program|project|repo|repository|workspace|codebase|file|test|bug|error|app|application|component|function|module|script|api|fynext\w*|javascript|typescript|python|node|npm|git)\b|\b(?:kod|proje|repo|dosya|test|hata|uygulama|bilesen|fonksiyon|modul|betik)\w*/;
+  const action =
+    /\b(?:build|implement|add|fix|edit|update|change|remove|delete|rename|move|create|generate|write|run|execute|test|install|configure|refactor|migrate|search|inspect|review|analyze|analyse|summarize|summarise|check|verify|open|read|list|fetch|scan|improve|enhance|optimize|debug)\b|\b(?:yap|olustur|ekle|duzelt|degistir|duzenle|sil|tasi|kur|calistir|incele|tara|ara|bul|kontrol\s+et|test\s+et|yaz|guncelle|uygula|coz|hallet|gelistir|iyilestir|optimize\s+et|onar)\w*/;
+
+  return Boolean(request) &&
+    (workspaceReference.test(request) || (codeScope.test(request) && action.test(request)));
+}
+
 function callSignature(cfg, call) {
   const args = Object.assign({}, call.arguments || {});
   if (call.name === 'fs_write' && !args.append) delete args.append;
@@ -173,6 +196,44 @@ function callSignature(cfg, call) {
     }
   }
   return call.name + ':' + JSON.stringify(args);
+}
+
+function toolApprovalPrompt(cfg, call) {
+  const args = call.arguments || {};
+  const details = Object.entries(args)
+    .map(([key, value]) => {
+      const displayed = key === 'content' || key === 'replace'
+        ? summarize(value, 180)
+        : summarize(typeof value === 'string' ? value : JSON.stringify(value), 180);
+      return `${key}: ${displayed}`;
+    })
+    .join('\n');
+  const location = typeof args.path === 'string'
+    ? path.resolve(cfg.workspace, args.path)
+    : typeof args.cwd === 'string'
+      ? path.resolve(cfg.workspace, args.cwd)
+      : '';
+  const heading = {
+    fs_list: 'Klasör içeriği listelenecek',
+    fs_glob: 'Dosya adlarında arama yapılacak',
+    fs_grep: 'Dosya içeriklerinde arama yapılacak',
+    fs_read: 'Dosya okunacak',
+    fs_write: 'Dosya oluşturulacak veya yazılacak',
+    fs_edit: 'Dosya düzenlenecek',
+    fs_delete: 'Dosya veya klasör silinecek',
+    fs_move: 'Dosya veya klasör taşınacak',
+    fs_mkdir: 'Klasör oluşturulacak',
+    shell_exec: 'Kabuk komutu çalıştırılacak',
+    git_status: 'Git durumu okunacak',
+    git_diff: 'Git farkları okunacak',
+    git_log: 'Git geçmişi okunacak',
+    web_search: 'Web araması yapılacak',
+    web_fetch: 'Web sayfası alınacak'
+  }[call.name] || `Araç çalıştırılacak: ${call.name}`;
+  return summarize(
+    [heading, location && `Konum: ${location}`, details].filter(Boolean).join('\n'),
+    700
+  );
 }
 
 function isAbort(err) {
@@ -199,6 +260,14 @@ function buildSystemPrompt(cfg, base, mode) {
     `- Onay: ${cfg.approveDestructive ? 'açık' : 'kapalı'}`,
     `- Çalışma alanı dışı erişim: ${cfg.allowOutsideWorkspace ? 'açık' : 'kapalı'}`,
     '- Dosya yollarında mümkün olduğunda çalışma alanına göreli yollar kullan.',
+    '- Önce isteğin amacını, kapsamını, dilini ve istenen çıktı biçimini belirle; bilgi sorusunu eylem isteğinden ayır.',
+    '- Projeye/koda ilişkin inceleme, hata ayıklama, öneri veya değişiklik isteğinde ilgili dosya ve araçlarla kanıt topla; yalnızca varsayıma dayalı yanıt verme.',
+    '- Bir araç sonucu geldikten sonra görevi tamamlamak için gereken sonraki adımı değerlendir; ilk araç çağrısı veya ilk yanıtla yetinme.',
+    '- Kullanıcı metin yazma, yeniden yazma veya çeviri istiyorsa yalnızca nasıl yapılacağını anlatma; istenen dil, ton, hedef kitle ve biçimde kullanılabilir metnin tamamını üret.',
+    '- Yanıtı kullanıcının istediği biçimde ver. Belirtmediyse doğrudan bir sonuçla başla; karmaşık yanıtları anlamlı başlıklar, maddeler veya numaralı adımlarla düzenle.',
+    '- Teknik görevlerde tamamlananları, değiştirilen konumları ve test/doğrulama sonuçlarını somut biçimde belirt; başarısız kontrolleri gizleme. Kod veya komut istendiyse çalıştırılabilir tam örneği kod bloğunda ver.',
+    '- Yeterince açıklayıcı ve kullanışlı ol; ilgisiz arka plan, tekrar, boş övgü ve genel tavsiyeler ekleme.',
+    '- İç muhakemeyi veya gizli düşünce zincirini açıklama; bunun yerine sonucu, kısa gerekçeyi ve doğrulanabilir kanıtı sun.',
     mode === 'plan'
       ? '- PLAN modunda incele ve oner; degisiklik yapma.'
       : '- BUILD modunda islemleri gercekten yap; sadece anlatma. Sonucu kisa bicimde ozetle.',
@@ -214,7 +283,8 @@ function buildSystemPrompt(cfg, base, mode) {
           '- Önce fs_list veya fs_glob ile ilgili dosyayı bul, sonra fs_read ile içeriğini oku.',
           '- Yeni dosya oluşturmak veya dosyayı değiştirmek için fs_write ya da fs_edit kullan; araç onay bekliyorsa kullanıcı yanıtını bekle.',
           '- Değişiklikten sonra fs_read ile sonucu doğrula. Araç hata verirse hatayı açıkça bildir; yapılmamış işi tamamlanmış gibi gösterme.',
-          '- Dosya aracı yollarını çalışma alanına göreli ver; çalışma alanının kökünü listelemek için fs_list yolunu "." kullan.'
+          '- Dosya aracı yollarını çalışma alanına göreli ver; çalışma alanının kökünü listelemek için fs_list yolunu "." kullan.',
+          '- Araç parametrelerini mevcut şemaya göre ver; yinelenen çağrılardan kaçın ve araç hatalarını başarı gibi sunma.'
         ]
       : [])
   ].join('\n');
@@ -407,12 +477,12 @@ async function main() {
     presenter.newConversationHandler(startNewConversation);
   }
 
-  async function chatWithUsage(history, availableTools) {
+  async function chatWithUsage(history, availableTools, showDeltas) {
     let streamedChars = 0;
     const startedAt = Date.now();
     const result = await llm.chat(cfg, history, availableTools, (delta) => {
       streamedChars += String(delta).length;
-      presenter.assistantDelta(delta);
+      if (showDeltas !== false) presenter.assistantDelta(delta);
       const liveTokens = Math.ceil(streamedChars / 4);
       const liveRate = Math.round(liveTokens * 60000 / Math.max(1, Date.now() - startedAt));
       const completedTokens = sessionUsage.promptTokens + sessionUsage.outputTokens;
@@ -431,13 +501,20 @@ async function main() {
     recordUsage(result.stats);
     return result;
   }
-
   async function runAgent() {
+
     activeController = new AbortController();
     cfg.abortSignal = activeController.signal;
+    const currentRequest = messages[messages.length - 1];
+    const requiresTools = currentRequest &&
+      currentRequest.role === 'user' &&
+      requiresToolFollowThrough(currentRequest.content);
     const seen = new Map();
     let totalCalls = 0;
     let rounds = 0;
+    let toolRetries = 0;
+    let executedTool = false;
+    let modelHistory = messages;
 
     try {
       for (;;) {
@@ -445,7 +522,11 @@ async function main() {
         presenter.beginThinking();
         let out;
         try {
-          out = await chatWithUsage(messages, tools.definitionsForMode(mode));
+          out = await chatWithUsage(
+            modelHistory,
+            tools.definitionsForMode(mode),
+            !requiresTools || executedTool
+          );
         } catch (err) {
           presenter.assistantDone();
           throw err;
@@ -460,17 +541,38 @@ async function main() {
         if (process.env.FYNEXT_DEBUG) {
           process.stderr.write(`[debug] tur ${rounds} calls ${JSON.stringify(calls)}\n`);
         }
-        if (content || calls.length) {
-          const message = { role: 'assistant', content: calls.length ? '' : content };
-          if (calls.length) {
-            message.tool_calls = calls.map((call) => ({
-              id: call.id,
-              function: { name: call.name, arguments: call.arguments }
-            }));
-          }
+        if (calls.length) {
+          const message = { role: 'assistant', content: '' };
+          message.tool_calls = calls.map((call) => ({
+            id: call.id,
+            function: { name: call.name, arguments: call.arguments }
+          }));
           messages.push(message);
         }
-        if (!calls.length) return content;
+        if (!calls.length) {
+          if (requiresTools && !executedTool && toolRetries < MAX_TOOL_RETRIES) {
+            toolRetries += 1;
+            modelHistory = modelHistory.concat(
+              ...(content ? [{ role: 'assistant', content }] : []),
+              {
+                role: 'user',
+                content:
+                  '[SİSTEM] Bu istek çalışma alanında işlem veya inceleme gerektiriyor; önceki yanıt araç kullanmadı. Uygun aracı şimdi çağır, sonuçları incele ve isteği tamamla. PLAN modunda yalnızca salt okunur araç kullan. Araç kullanmadan işi yaptığını iddia etme.'
+              }
+            );
+            presenter.note(`araç çağrısı yapılmadı; görev araçlarla yeniden deneniyor (${toolRetries}/${MAX_TOOL_RETRIES})`);
+            continue;
+          }
+          if (requiresTools && !executedTool) {
+            const warning =
+              'Bu istek için gerekli araç çağrısı üretilemedi. Herhangi bir araç çalıştırmadım ve çalışma alanında değişiklik yapmadım.';
+            messages.push({ role: 'assistant', content: warning });
+            return warning;
+          }
+          if (content) messages.push({ role: 'assistant', content });
+          return content;
+        }
+        modelHistory = messages;
 
         let overLimit = false;
         const roundSeen = new Set();
@@ -514,13 +616,43 @@ async function main() {
             continue;
           }
 
+          let approved = false;
+          try {
+            approved = await presenter.confirm(
+              toolApprovalPrompt(cfg, call),
+              { allowAlways: false, centered: true, approval: true }
+            );
+          } catch (err) {
+            presenter.note(`araç onayı alınamadı; işlem yapılmadı: ${err.message}`);
+          }
+          if (!approved) {
+            const resultText = 'Kullanıcı bu araç adımını onaylamadı. İşlem yapılmadı; bu adımı yeniden deneme.';
+            executedTool = true;
+            presenter.note(`${call.name}: kullanıcı onaylamadı; araç çalıştırılmadı.`);
+            messages.push({
+              role: 'tool',
+              tool_name: call.name,
+              tool_call_id: call.id,
+              content: resultText
+            });
+            continue;
+          }
+
           presenter.toolStart(call.name, call.arguments);
           let resultText;
           let ok = true;
           try {
-            resultText = await tools.run(cfg, call.name, call.arguments, mode);
+            resultText = await tools.run(
+              cfg,
+              call.name,
+              call.arguments,
+              mode,
+              { toolCallApproved: true }
+            );
+            executedTool = true;
           } catch (err) {
             ok = false;
+            executedTool = true;
             resultText = 'HATA: ' + (err && err.message ? err.message : String(err));
           }
           presenter.toolEnd(call.name, ok, summarize(resultText, 240));
@@ -546,7 +678,7 @@ async function main() {
       const guard = {
         role: 'user',
         content:
-          '[SİSTEM] Bu turda araç çağırma. Elindeki bağlam ve araç sonuçlarına dayanarak kullanıcının isteğini gerçekten yanıtla. Kullanıcının dilini ve konuşmanın tonunu koru; doğrudan başla, gerektiği kadar ayrıntı ver ve yararlı olduğunda kısa başlıklar veya adımlar kullan. Yapılmamış bir işi tamamlandı gibi gösterme; belirsizlikleri ve doğrulanmamış noktaları açıkça belirt. Gereksiz yetenek tanıtımı, genel tavsiye ve tekrar ekleme.'
+          '[SİSTEM] Bu turda araç çağırma. Kullanıcının asıl isteğini ve konuşma bağlamını yanıtla; kullanıcıyla aynı dili ve istenen biçimi kullan. Yapılan işi ve doğrulama sonucunu somut biçimde belirt; başarısızlıkları, belirsizlikleri ve yapılmayan adımları açıkça söyle. Kullanıcı metin/doküman istediyse yalnızca özetleme, istenen kullanılabilir metni üret. Gereksiz giriş, tekrar ve genel tavsiye ekleme.'
       };
       let final;
       try {

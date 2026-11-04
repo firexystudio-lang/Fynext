@@ -38,10 +38,46 @@ It is an open-source solution that runs securely on your computer.
 | **Local Execution** | All processing happens locally; your data never leaves your machine. |
 | **Fast Processing** | Runs fast thanks to optimized performance. |
 | **Targeted Solutions** | Customizable for specific tasks. |
+| **Command Palette** | Search and run slash commands with `Ctrl+P` / `Ctrl+N`. |
+| **Workspace Mentions** | Attach files to the conversation with `@path` suggestions. |
+| **Shell Passthrough** | Run local commands directly with `!command`. |
+| **Undo / Redo** | Track file changes and reverse them with `/undo` and `/redo`. |
+| **Themes & Diff View** | Five built-in themes and colored git diffs. |
+| **Collapsible Code** | Keep assistant code compact; click a highlighted filename inline to view or hide its contents. |
+| **Compact & Export** | Summarize context with `/compact`, export chats with `/export`. |
 
-## API mode
+### Slash commands
 
-Run `fynext --ms` to choose from 37 presets: 30 hosted API providers and seven local API servers. Fynext asks for the model ID and API key; the key is hidden while typing and is not saved. Choose `0` for a custom OpenAI-compatible endpoint. Provider model IDs and tool support vary. In non-interactive use, set `FYNEXT_PROVIDER` (or `OPENAI_BASE_URL`), `OPENAI_MODEL`, and `FYNEXT_API_KEY`. API mode also works in Termux with Node.js 18 or later.
+| Command | Description |
+| :-- | :-- |
+| `/help` | List commands and shortcuts. |
+| `/model`, `/models` | Switch model or pick a local Ollama model. |
+| `/review`, `/plan`, `/build`, `/mode` | Review, plan, or build workflows. |
+| `/changes`, `/undo`, `/redo` | Inspect and reverse file changes made by tools. |
+| `/diff [path]` | Show a colored git diff. |
+| `/theme [name]` | List or switch themes. |
+| `/details on\|off` | Toggle thinking details (`Ctrl+T`). |
+| `/compact` | Summarize the conversation to reduce context. |
+| `/export [file]` | Export the conversation as Markdown or JSON. |
+| `/editor [file]` | Open a file in the configured editor. |
+| `/init [--force]` | Create or refresh `AGENTS.md` for the workspace. |
+| `/keybind [action key]` | Show or change TUI key bindings. |
+| `/history`, `/new`, `/clear`, `/exit` | Manage conversations and the session. |
+
+### TUI shortcuts
+
+| Shortcut | Action |
+| :-- | :-- |
+| `Enter` | Send the prompt. |
+| `Tab` | Switch between Plan and Build modes. |
+| `Alt+Enter` / `Ctrl+J` | Insert a new line. |
+| `Ctrl+P` / `Ctrl+N` | Open the command palette. |
+| `Ctrl+Up` / `Ctrl+Down` | Walk through input history. |
+| `Ctrl+T` | Toggle thinking details. |
+| `Ctrl+O` | Start a new conversation. |
+| `Ctrl+L` | Redraw the screen. |
+| `Ctrl+C` | Stop the running task; press twice to exit when idle. |
+| `!command` | Run a shell command from the prompt. |
 
 ## Possible Additions
 
@@ -77,6 +113,26 @@ Install Fynext globally via npm:
 npm install -g github:firexystudio-lang/Fynext
 ```
 
+### Project structure
+
+```text
+bin/            CLI entry point
+src/cli/        main orchestration and TUI wiring
+src/agent/      intent routing and tool status formatting
+src/ai/         Ollama client and tool-call parsing
+src/tools/      filesystem, git, web, and shell tools
+src/context/    project memory and conversation context
+src/history/    chat history and change tracking (undo/redo)
+src/ui/         screen, theme, text helpers, plain fallback
+src/config/     defaults and settings persistence
+src/setup/      first-run setup
+src/workflow/   feature roadmap and workflow presets
+test/           node:test suites and fixtures
+config/         system prompt and user settings
+```
+
+Run the test suite with `npm test`.
+
 ### Running on Termux (Experimental)
 
 > [!WARNING]
@@ -99,6 +155,9 @@ Fynext now includes the full recommended feature set as a practical roadmap for 
 | Context indexing | ✅ Implemented | Workspace metadata is cached for faster project-aware answers. |
 | Git integration | ✅ Implemented | Git branch, status and recent commits are surfaced through `/git` and `/project`. |
 | Autonomous planning mode | ✅ Implemented | `/plan` mode is available for read-only analysis and safe recommendations. |
+| Interactive TUI productivity | ✅ Implemented | Command palette, `@` file mentions, shell passthrough, themes, keybindings and notifications. |
+| Change tracking and undo | ✅ Implemented | File mutations are recorded per session and can be reversed with `/undo` or reapplied with `/redo`. |
+| Context control | ✅ Implemented | `/compact` summarizes long conversations and `/export` writes Markdown or JSON transcripts. |
 | Documentation generation | 🟡 Planned | Useful for README, API docs and inline code explanations. |
 | User-friendly plugins | 🟡 Planned | Configurable presets and custom workflow extensions can be layered on top of the existing tool system. |
 

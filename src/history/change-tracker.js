@@ -128,10 +128,10 @@ function displayPath(workspace, filePath) {
 
 function describe(entry, workspace, index) {
   const files = entry.files.map((file) => {
-    const change = `+${file.added} -${file.removed} satır`;
+    const change = `+${file.added} -${file.removed} lines`;
     return `${displayPath(workspace || entry.workspace, file.path)} (${change})`;
   });
-  const date = new Date(entry.createdAt).toLocaleTimeString('tr-TR');
+  const date = new Date(entry.createdAt).toLocaleTimeString('en-US');
   return `${index == null ? '' : `${index + 1}. `}${date} · ${entry.action} · ${files.join(', ')}`;
 }
 
@@ -157,18 +157,18 @@ function restore(state) {
 
 function undo(entry, cfg) {
   if (path.resolve(cfg.workspace) !== path.resolve(entry.workspace)) {
-    throw new Error('Bu değişiklik başka bir çalışma alanında yapıldı; önce o çalışma alanına geçin.');
+    throw new Error('This change was made in another workspace; switch to that workspace first.');
   }
   if (!cfg.allowOutsideWorkspace && entry.after.some((state) => {
     const relative = path.relative(cfg.workspace, state.path);
     return relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative);
   })) {
-    throw new Error('Geri alınacak değişiklik çalışma alanı dışında; mevcut erişim ayarı buna izin vermiyor.');
+    throw new Error('The change to undo is outside the workspace; the current access settings do not allow this.');
   }
   const current = entry.after.map((state) => snapshot(state.path, MAX_SNAPSHOT_BYTES));
   const changed = current.some((state, index) => !sameState(state, entry.after[index]));
   if (changed) {
-    throw new Error('Dosyalar Fynext değişikliğinden sonra yeniden değişmiş. Başka düzenlemeleri ezmemek için geri alma yapılmadı.');
+    throw new Error('Files have changed since the Fynext operation. Nothing was undone to avoid overwriting other edits.');
   }
   for (const state of entry.before) restore(state);
   for (const directory of (entry.createdDirectories || []).slice().sort((a, b) => b.length - a.length)) {

@@ -1,11 +1,12 @@
-﻿'use strict';
+'use strict';
 
 const readline = require('readline');
 const { C, S, sweepText } = require('./theme');
 const { sanitize } = require('./screen');
+const { describeToolAction, normalizeStatus, liveStatusFromText } = require('../agent/tool-status');
 
-const YES = new Set(['e', 'evet', 'y', 'yes', 'onay', 'onayla', '1']);
-const ALWAYS = new Set(['a', 'hep', 'her zaman', 'always']);
+const YES = new Set(['y', 'yes', 'e', 'evet', 'onay', 'onayla', '1']);
+const ALWAYS = new Set(['a', 'always', 'hep', 'her zaman']);
 
 class PlainPresenter {
   constructor(opts) {
@@ -14,7 +15,7 @@ class PlainPresenter {
     this.stdin = options.stdin || process.stdin;
     this.model = options.model || 'qwen2.5-coder:3b';
     this.cwd = options.cwd || process.cwd();
-    this.status = options.status || 'hazÄ±r';
+    this.status = options.status || 'ready';
     this.color = options.color !== false && !process.env.NO_COLOR && !!this.stdout.isTTY;
     this.busy = false;
     this.started = false;
@@ -26,6 +27,7 @@ class PlainPresenter {
     this._thinkingSweepTick = 0;
     this._thinkingSweepTimer = null;
     this._streamed = false;
+    this._streamText = '';
     this._promptActive = false;
     this.usage = '';
     this.onSubmit = null;
@@ -59,6 +61,7 @@ class PlainPresenter {
       this._streamed = false;
       this._line();
     }
+    this._streamText = '';
   }
 
   start() {
@@ -163,7 +166,7 @@ class PlainPresenter {
   restoreConversation(messages) {
     for (const message of messages || []) {
       if (!message || !['user', 'assistant'].includes(message.role) || !message.content) continue;
-      const label = message.role === 'user' ? 'sen' : 'fynext';
+      const label = message.role === 'user' ? 'you' : 'fynext';
       this._line(`${this._c(C.accent)}${label}:${this._reset()} ${sanitize(message.content)}`);
     }
     if (messages && messages.length) this._line();
@@ -171,9 +174,10 @@ class PlainPresenter {
 
   beginThinking() {
     this._thinking = true;
-    this._thinkingStatus = 'Ä°steÄŸi deÄŸerlendiriyor';
+    this._thinkingStatus = 'Reviewing the request';
     this._thinkingSweepTick = 0;
     this._streamed = false;
+    this._streamText = '';
     if (this.stdout.isTTY) {
       this._write(this._thinkingLine());
       this._stopThinkingSweep();
@@ -197,7 +201,7 @@ class PlainPresenter {
     const status = this._thinkingStatus
       ? sweepText(` ${this._thinkingStatus}`, this._thinkingSweepTick, this.color)
       : '';
-    return this._c(C.grayDim) + S.sep + status + 'â€¦' + this._reset();
+    return this._c(C.grayDim) + S.sep + status + '…' + this._reset();
   }
   _stopThinkingSweep() {
     if (!this._thinkingSweepTimer) return;
@@ -214,6 +218,7 @@ class PlainPresenter {
       if (this.stdout.isTTY) this._write('\r\x1b[2K');
     }
     this._streamed = true;
+    this._streamText += chunk;
     this._write(chunk);
   }
 
@@ -229,24 +234,20 @@ class PlainPresenter {
     }
   }
 
-  toolStart(name, args) {
+  toolStart(name, args, status) {
+    const streamed = String(this._streamText || '').trim();
     this._finishStream();
-    let arg = '';
-    const obj = args && typeof args === 'object' ? args : {};
-    for (const key of ['command', 'path', 'query', 'url', 'source', 'destination']) {
-      if (typeof obj[key] === 'string' && obj[key].trim()) {
-        arg = obj[key].replace(/\s+/g, ' ').trim();
-        break;
-      }
-    }
-    if (arg.length > 140) arg = arg.slice(0, 140) + 'â€¦';
+    const action = String(status || describeToolAction(name, args)).replace(/\s+/g, ' ').trim();
+    const streamedStatus = liveStatusFromText(streamed) || normalizeStatus(streamed);
+    if (streamed && streamedStatus === normalizeStatus(action)) return;
     this._line(
       this._c(C.yellow) +
         S.arrow +
         ' ' +
-        name +
         this._reset() +
-        (arg ? '  ' + this._c(C.grayDim) + arg + this._reset() : '')
+        this._c(C.accent) +
+        action +
+        this._reset()
     );
   }
 
@@ -284,16 +285,48 @@ class PlainPresenter {
     if (!this.rl) return Promise.resolve(false);
     return new Promise((resolve) => {
       const allowAlways = !options || options.allowAlways !== false;
-      this.pendingConfirm = { allowAlways, resolve };
+      const approval = !!(options && options.approval);
+      this.pendingConfirm = { allowAlways, approval, resolve };
       this._finishStream();
       this._clearPrompt();
-      this.rl.setPrompt(
-        this._c(C.yellow) +
-          (allowAlways ? 'onay [e/H/a=hep izin ver] ' : 'onay [e/H] ') +
-          this._reset() +
-          String(question || '').replace(/\s+/g, ' ').trim() +
-          ' '
-      );
+      if (approval) {
+        const width = 76;
+        const bodyWidth = width - 4;
+        const body = String(question || '')
+          .replace(/\x1b\[[0-9;]*m/g, '')
+          .split('\n')
+          .flatMap((line) => {
+            const chars = Array.from(line);
+            const wrapped = [];
+            while (chars.length > bodyWidth) wrapped.push(chars.splice(0, bodyWidth).join(''));
+            if (chars.length) wrapped.push(chars.join(''));
+            return wrapped;
+          });
+        const top = '╭─ ⚠ APPROVAL REQUIRED ' + '─'.repeat(width - 22) + '╮';
+        const bottom = '╰' + '─'.repeat(width - 2) + '╯';
+        this._line(this._c(C.orange) + top + this._reset());
+        this._line(this._c(C.white) + '│ fynext is waiting for approval to continue' +
+          ' '.repeat(Math.max(0, bodyWidth - 42)) + ' │' + this._reset());
+        for (const line of body) {
+          this._line(this._c(C.orange) + '│ ' + this._reset() + line +
+            ' '.repeat(Math.max(0, bodyWidth - Array.from(line).length)) +
+            this._c(C.orange) + ' │' + this._reset());
+        }
+        this._line(this._c(C.green) + '│ [Y] ALLOW' +
+          this._reset() + '     ' + this._c(C.redBright) + '[N] DENY' +
+          this._reset() + this._c(C.orange) +
+          ' '.repeat(Math.max(0, width - 38)) + '│' + this._reset());
+        this._line(this._c(C.orange) + bottom + this._reset());
+        this.rl.setPrompt(this._c(C.yellow) + 'Allow this action? [Y/N] > ' + this._reset());
+      } else {
+        this.rl.setPrompt(
+          this._c(C.yellow) +
+            (allowAlways ? 'Approve [y/N/a=always] ' : 'Approve [y/N] ') +
+            this._reset() +
+            String(question || '').replace(/\s+/g, ' ').trim() +
+            ' '
+        );
+      }
       this._promptActive = true;
       this.rl.prompt();
     });
@@ -304,7 +337,7 @@ class PlainPresenter {
     this._promptActive = true;
     this.rl.setPrompt(
       this._c(C.red) + 'fynext ' + S.arrow + ' ' + this._reset() +
-      this._c(C.grayDim) + `[${this.model}${this.usage ? ' Â· ' + this.usage : ''}] ` + this._reset()
+      this._c(C.grayDim) + `[${this.model}${this.usage ? ' · ' + this.usage : ''}] ` + this._reset()
     );
     this.rl.prompt();
   }
@@ -320,7 +353,7 @@ class PlainPresenter {
       return;
     }
     if (this.busy) {
-      this.note('iÅŸlem sÃ¼rÃ¼yor; bitmesini bekleyin veya Ctrl+C ile durdurun.');
+      this.note('A task is running; wait for it to finish or press Ctrl+C to stop.');
       return;
     }
     const text = String(line == null ? '' : line).trim();
@@ -359,7 +392,7 @@ class PlainPresenter {
           /* yoksay */
         }
       }
-      this.setNotice('durduruluyorâ€¦');
+      this.setNotice('Stopping…');
       return;
     }
     this._line();
@@ -375,4 +408,3 @@ class PlainPresenter {
 }
 
 module.exports = { PlainPresenter };
-

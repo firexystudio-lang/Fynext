@@ -58,9 +58,9 @@ function toToolCall(obj) {
 }
 
 function isToolCallCandidate(call, valid) {
-  if (!call) return false;
-  if (valid) return valid.has(call.name);
-  return /^(?:fs|git|web|shell)_[a-z0-9_]+$/i.test(call.name);
+  return Boolean(call) &&
+    ((valid && valid.has(call.name)) ||
+      /^(?:fs|git|web|shell)_[a-z0-9_]+$/i.test(call.name));
 }
 
 function findJsonObjects(text) {
@@ -283,6 +283,7 @@ function toolInstructions(tools, structured = false) {
     'When the user asks about this repository or its code (including inspection, review, analysis, debugging, or recommendations), inspect relevant files with tools before answering.',
     'A directory listing or cached project snapshot is not enough for a summary or review. Read actual file contents, including documentation, a manifest, and implementation code when available.',
     'In BUILD mode, carry out requested work. Do not answer an actionable project request with suggestions, a tutorial, or a request for the user to provide files that are already in the workspace.',
+    'For explicit requests to search or research the web, use web_search; use web_fetch to verify relevant sources. Do not claim web search is unavailable when these tools are listed.',
     'When creating a new file, call fs_write with path and content; never use fs_edit, which requires an existing search string. If no content was requested, write an empty string. Respect the exact location requested by the user.',
     'Use the smallest useful sequence: locate relevant files, read them, act if requested, then verify. Do not modify files in PLAN mode.',
     structured
@@ -355,7 +356,7 @@ function messageSize(message) {
 function compactText(text, limit) {
   const value = String(text == null ? '' : text);
   if (value.length <= limit) return value;
-  const marker = '\n[… içerik bağlam sınırı için kısaltıldı …]\n';
+  const marker = '\n[… content truncated to fit context limit …]\n';
   if (limit <= marker.length) return value.slice(0, limit);
   const remaining = limit - marker.length;
   const head = Math.ceil(remaining * 0.7);
@@ -442,11 +443,11 @@ async function doRequest(cfg, messages, tools, signal, format) {
       signal
     });
   } catch (err) {
-    if (cfg.abortSignal && cfg.abortSignal.aborted) throw new Error('Istek iptal edildi.');
+    if (cfg.abortSignal && cfg.abortSignal.aborted) throw new Error('Request was cancelled.');
     if (err.name === 'TimeoutError' || /timeout/i.test(String(err.message || ''))) {
-      throw new Error('Model yanit zaman asimina ugradi.');
+      throw new Error('Model response timed out.');
     }
-    throw new Error(`Ollama sunucusuna baglanilamadi (${url}): ${err.message}`);
+    throw new Error(`Could not connect to Ollama server (${url}): ${err.message}`);
   }
 }
 
@@ -548,8 +549,8 @@ async function chat(cfg, messages, tools, onDelta, chatOptions = {}) {
       }
     }
   } catch (err) {
-    if (cfg.abortSignal && cfg.abortSignal.aborted) throw new Error('Istek iptal edildi.');
-    if (err.name === 'TimeoutError') throw new Error('Ollama yanit zaman asimina ugradi.');
+    if (cfg.abortSignal && cfg.abortSignal.aborted) throw new Error('Request was cancelled.');
+    if (err.name === 'TimeoutError') throw new Error('Ollama response timed out.');
     throw err;
   }
 
@@ -566,7 +567,7 @@ async function chat(cfg, messages, tools, onDelta, chatOptions = {}) {
   }
   if (toolCalls.length) return { content: nativeCalls.length ? content : '', toolCalls, stats };
   if (rejectedToolCall && !content.trim()) {
-    content = 'Bu arac mevcut modda kullanilamaz. Plan modunda yalnizca salt okunur araclar aciktir.';
+    content = 'This tool is not available in the current mode. PLAN mode only allows read-only tools.';
   }
   stats.totalMs = stats.totalMs || Date.now() - startedAt;
   stats.model = cfg.model;
@@ -592,7 +593,7 @@ async function listModels(cfg) {
 
 async function listAvailableModels(cfg) {
   const models = await listModels(cfg);
-  if (!models.length) throw new Error('Ollama model listesi alinamadi; Ollama calisiyor mu kontrol edin.');
+  if (!models.length) throw new Error('Could not list Ollama models. Is Ollama running?');
   return models.sort((a, b) => a.localeCompare(b));
 }
 
