@@ -67,6 +67,41 @@ test('mode and approval commands offer filtered on/off choices', () => {
   assert.deepEqual(screen._activeSuggestions().items.map((item) => item.value), ['on', 'off']);
 });
 
+test('slash argument suggestions render labels when typing a command and space', () => {
+  const screen = makeScreen();
+
+  screen.setInput('/gpu');
+  screen._handleKey('tab');
+  assert.equal(screen.getInput(), '/gpu ');
+  const tabSuggestions = stripAnsi(screen.renderToString(90, 30));
+  assert.match(tabSuggestions, /Use the GPU when available/);
+
+  screen.setInput('/mode ');
+  const modeSuggestions = stripAnsi(screen.renderToString(90, 30));
+  assert.match(modeSuggestions, /plan/);
+  assert.match(modeSuggestions, /Read-only planning mode/);
+
+  screen.setInput('/gpu ');
+  const gpuSuggestions = stripAnsi(screen.renderToString(90, 30));
+  assert.match(gpuSuggestions, /auto/);
+  assert.match(gpuSuggestions, /Use the GPU when available/);
+
+  screen.setInput('/engine ');
+  const engineSuggestions = stripAnsi(screen.renderToString(90, 30));
+  assert.match(engineSuggestions, /ollama/);
+});
+
+test('port command suggests the Fynext ESP32 activation target', () => {
+  const screen = makeScreen();
+  screen.setInput('/port ');
+
+  const active = screen._activeSuggestions();
+  assert.equal(active.kind, 'slash-argument');
+  assert.deepEqual(active.items.map((item) => item.value), ['fynext esp32']);
+  screen._handleKey('tab');
+  assert.equal(screen.getInput(), '/port fynext esp32 ');
+});
+
 test('Enter submits /mode without exiting and completes explicit mode arguments', () => {
   const screen = makeScreen();
   const submitted = [];

@@ -136,6 +136,13 @@ function isUsefulStatus(value) {
   return true;
 }
 
+function stripStatusInstructions(text) {
+  return String(text || '')
+    .split('\n')
+    .filter((line) => !/\bSTATUS\b/.test(line))
+    .join('\n');
+}
+
 function parseMarkedStatus(value, allowEof) {
   const text = String(value == null ? '' : value).replace(/\r/g, '');
   const leading = text.match(/^\s*/);
@@ -276,6 +283,7 @@ module.exports = {
   normalizeStatus,
   liveStatusFromText,
   parseMarkedStatus,
+  stripStatusInstructions,
   stripStatusLine,
   StatusStreamFilter,
   shortPath

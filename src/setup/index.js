@@ -152,6 +152,21 @@ async function ensureReady(cfg, opts) {
   const log = options.log || ((line) => process.stdout.write(line + '\n'));
   const tty = options.tty !== undefined ? options.tty : !!process.stdout.isTTY;
 
+  if (cfg.provider === 'lumen') {
+    const lumen = require('../lumen');
+    const model = lumen.getModel(cfg.model);
+    if (!model) {
+      throw new Error(`Unknown Lumen model "${cfg.model}". Choose a supported model with /models.`);
+    }
+    if (!await lumen.isModelInstalled(cfg, model)) {
+      log(`Lumen model is not installed. Run /model ${model.id} to download it (${formatBytes(model.size)}).`);
+    }
+    return lumen.listModels(cfg);
+  }
+  if (cfg.provider !== 'ollama') {
+    throw new Error(`Unsupported model provider: ${cfg.provider}`);
+  }
+
   let models = await fetchTags(cfg, 3000);
   if (!models) {
     if (!isLocalUrl(cfg)) {

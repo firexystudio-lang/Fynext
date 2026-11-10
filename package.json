@@ -20,7 +20,20 @@
     "test": "node --test"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
-  "license": "MIT"
+  "dependencies": {
+    "node-llama-cpp": "3.22.2",
+    "serialport": "^12.0.0"
+  },
+  "overrides": {
+    "node-llama-cpp": {
+      "simple-git": "4.0.2"
+    }
+  },
+  "license": "MIT",
+  "allowScripts": {
+    "node-llama-cpp@3.22.2": true,
+    "@serialport/bindings-cpp@12.0.1": true
+  }
 }

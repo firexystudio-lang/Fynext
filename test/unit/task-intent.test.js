@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
   requiresToolFollowThrough,
   requiresWebSearch,
+  promisesWebSearch,
   requiresImplementation
 } = require('../../src/agent/task-intent');
 
@@ -85,4 +86,12 @@ test('does not require tools for informational questions', () => {
   ]) {
     assert.equal(requiresToolFollowThrough(request), false, request);
   }
+});
+
+test('detects unfulfilled web search promises in assistant text', () => {
+  assert.equal(promisesWebSearch('Bunun için web araması yapacağım ve bilgi toplayacağım.'), true);
+  assert.equal(promisesWebSearch('I will search the web for the latest documentation.'), true);
+  assert.equal(promisesWebSearch('Searching the web for modern Next.js 15 features...'), true);
+  assert.equal(promisesWebSearch('İnternette araştırma yapıp döneceğim.'), true);
+  assert.equal(promisesWebSearch('Here is the final answer with complete code.'), false);
 });

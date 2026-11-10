@@ -24,6 +24,7 @@ test('tool argument validation rejects missing, unknown, and mistyped fields wit
   assert.match(tools.validateCall('web_search', { query: 42 }, 'build').error, /invalid type/);
   assert.equal(tools.validateCall('fs_write', { path: 'README.md', content: 'x' }, 'plan').valid, false);
   assert.equal(tools.validateCall('fs_read', { path: 'README.md' }, 'plan').valid, true);
+  assert.equal(tools.validateCall('fs_write', { path: 'empty.txt', content: '' }, 'build').valid, true);
 });
 
 test('request-aware tool selection keeps project inspection focused and exposes edits only for build work', () => {
@@ -42,6 +43,11 @@ test('request-aware tool selection keeps project inspection focused and exposes 
     .map((entry) => entry.function.name);
   assert.ok(webTools.includes('web_search'));
   assert.ok(!webTools.includes('fs_write'));
+
+  const websiteTools = tools.definitionsForRequest('build', 'web sitesi yap')
+    .map((entry) => entry.function.name);
+  assert.ok(websiteTools.includes('web_search'));
+  assert.ok(websiteTools.includes('fs_write'));
 });
 
 test('quality scenarios retain their required tools and mode safety rules', () => {

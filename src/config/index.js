@@ -8,6 +8,7 @@ const ROOT = path.resolve(__dirname, '../..');
 
 const DEFAULTS = {
   agentName: 'fynext',
+  provider: 'ollama',
   ollamaUrl: 'http://127.0.0.1:11434',
   model: 'qwen2.5-coder:3b',
   modelProfiles: {
@@ -37,8 +38,12 @@ const DEFAULTS = {
   allowPackageInstall: false,
   allowOutsideWorkspace: true,
   keepAlive: '10m',
+  lumenGpu: 'auto',
   searchProvider: 'duckduckgo',
   searxngUrl: '',
+  robotFaceEnabled: false,
+  robotFacePort: 'auto',
+  robotFaceBaud: 115200,
   requestTimeoutSec: 30,
   maxOutputChars: 20000,
   maxReadBytes: 4194304,
@@ -77,8 +82,24 @@ function loadConfig() {
 
   const cfg = Object.assign({}, DEFAULTS, fileSettings);
   delete cfg.braveApiKey;
+  if (!['ollama', 'lumen'].includes(cfg.provider)) {
+    throw new Error(`Unknown model provider "${cfg.provider}". Supported providers: ollama, lumen.`);
+  }
+  if (cfg.provider === 'lumen' && !Object.prototype.hasOwnProperty.call(fileSettings, 'model')) {
+    cfg.model = require('../lumen/models').DEFAULT_MODEL_ID;
+  }
+  cfg.lumenGpu = String(cfg.lumenGpu || 'auto').toLowerCase();
+  if (!['auto', 'cpu'].includes(cfg.lumenGpu)) {
+    throw new Error(`Unknown Lumen GPU mode "${cfg.lumenGpu}". Use auto or cpu.`);
+  }
   cfg.root = ROOT;
   cfg.workspace = process.cwd();
+  const configRoot = process.env.XDG_CONFIG_HOME ||
+    (process.platform === 'win32' && process.env.APPDATA) ||
+    path.join(os.homedir(), '.config');
+  cfg.lumenModelDir = process.env.FYNEXT_MODEL_DIR ||
+    cfg.lumenModelDir ||
+    path.join(configRoot, 'fynext', 'models', 'lumen');
   cfg.systemPromptPath = path.resolve(ROOT, cfg.systemPromptFile);
   return cfg;
 }

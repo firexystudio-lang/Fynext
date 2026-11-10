@@ -448,17 +448,17 @@ function definitionsForMode(mode) {
 function definitionsForRequest(mode, request) {
   const text = String(request || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[ıİ]/g, 'i').toLowerCase();
-  const project = /\b(project|repo|repository|codebase|code|file|folder|workspace|proje|repo|kod|dosya|klasor|uygulama|hata|bug)\w*\b/.test(text);
+  const project = /\b(project|repo|repository|codebase|code|file|folder|workspace|proje|repo|kod|dosya|klasor|uygulama|hata|bug|fonksiyon|function|bilesen|component|script|api|endpoint|server)\w*\b/.test(text);
   const webSearch = /\b(web|internet|online|url|link|source|sources|latest|current|news|website|site|research|ara\w*|guncel|kaynak|internet|webde)\b/.test(text);
   const git = /\b(git|commit|branch|diff|history|log|durum|degisiklikler)\b/.test(text);
-  const shell = /\b(run|execute|test|build|lint|install|terminal|command|calistir|test|derle|kur|komut)\b/.test(text);
-  const mutate = /\b(fix|implement|add|edit|write|change|create|delete|remove|rename|move|refactor|update|duzelt|ekle|yaz|degistir|olustur|sil|tasi|duzenle|iyilestir)\w*\b/.test(text);
+  const shell = /\b(run|execute|test|build|lint|install|terminal|command|calistir|test|derle|kur|komut|npm|node|npx)\b/.test(text);
+  const mutate = /\b(fix|implement|add|edit|write|change|create|delete|remove|rename|move|refactor|update|patch|repair|solve|optimize|coz|hallet|duzelt|ekle|yaz|yap|degistir|olustur|sil|tasi|duzenle|iyilestir|guncelle|gelistir|onar|kodla|ayarla|entegre)\w*\b/.test(text);
   if (!project && !webSearch && !git && !shell && !mutate) return definitionsForMode(mode);
 
   const names = new Set();
   if (project || mutate) {
     ['fs_list', 'fs_read', 'fs_glob', 'fs_grep'].forEach((name) => names.add(name));
-    if (mutate && mode !== 'plan') {
+    if (mode !== 'plan') {
       ['fs_edit', 'fs_write', 'fs_delete', 'fs_move', 'fs_mkdir'].forEach((name) => names.add(name));
       names.add('shell_exec');
     }
@@ -824,7 +824,8 @@ function validateCall(name, args, mode) {
   const properties = schema.properties || {};
   const unknown = Object.keys(args).filter((key) => !Object.prototype.hasOwnProperty.call(properties, key));
   if (unknown.length) return { valid: false, error: `Unknown parameters: ${unknown.join(', ')}. Valid parameters: ${Object.keys(properties).join(', ') || '(none)'}.` };
-  const missing = (schema.required || []).filter((key) => args[key] == null || args[key] === '');
+  const missing = (schema.required || []).filter((key) =>
+    args[key] == null || (args[key] === '' && key !== 'content'));
   if (missing.length) return { valid: false, error: `Missing required parameters: ${missing.join(', ')}.` };
   for (const [key, value] of Object.entries(args)) {
     if (value == null) continue;

@@ -5,15 +5,21 @@ const path = require('path');
 const { ART_WIDE, ART_COMPACT, ART_WIDE_WIDTH, ART_COMPACT_WIDTH } = require('../art');
 const { C, S, sweepText, listThemes, colorToRgb } = require('../theme');
 const { describeToolAction, normalizeStatus, liveStatusFromText } = require('../../agent/tool-status');
+const { copyToClipboard, extractCodeBlocks } = require('../clipboard');
+const { renderInline, renderMarkdownLine, renderTable, isTableSeparator } = require('../markdown');
 
 const ESC = '\x1b[';
 const MAX_INPUT_ROWS = 8;
 const MAX_ITEM_CHARS = 200000;
 const MAX_CHAT_LINES = 50000;
+const COPY_HINT = '  [kopyala]';
+const COPY_HINT_WIDTH = 11;
 const SLASH_COMMANDS = [
   { name: 'help', description: 'Show commands and keyboard shortcuts' },
   { name: 'model', description: 'Select or switch the model', takesArgs: true },
-  { name: 'models', description: 'Select a local Ollama model' },
+  { name: 'models', description: 'Select a model for the current engine' },
+  { name: 'engine', description: 'Switch between Ollama and Lumen', takesArgs: true },
+  { name: 'gpu', description: 'Show or set Lumen GPU usage', takesArgs: true },
   { name: 'usage', description: 'Show session token usage' },
   { name: 'tools', description: 'List available tools' },
   { name: 'project', description: 'Show or refresh project context' },
@@ -28,9 +34,11 @@ const SLASH_COMMANDS = [
   { name: 'undo', description: 'Undo file changes', takesArgs: true },
   { name: 'redo', description: 'Redo undone file changes', takesArgs: true },
   { name: 'theme', description: 'Show or change the theme', takesArgs: true },
+  { name: 'port', description: 'Enable the Fynext ESP32 robot face', takesArgs: true },
   { name: 'details', description: 'Show or hide thinking details', takesArgs: true },
   { name: 'compact', description: 'Summarize conversation context' },
   { name: 'export', description: 'Export the conversation as Markdown or JSON', takesArgs: true },
+  { name: 'copy', description: 'Copy the last code block to the clipboard', takesArgs: true },
   { name: 'editor', description: 'Open a file in an external editor', takesArgs: true },
   { name: 'init', description: 'Create AGENTS.md for the workspace' },
   { name: 'keybind', description: 'Show or change keyboard shortcuts', takesArgs: true },
@@ -50,7 +58,24 @@ const SLASH_COMMANDS = [
   { name: 'exit', description: 'Exit Fynext' }
 ];
 const SLASH_ARGUMENTS = {
-  model: { hint: 'Press Enter to choose an installed model, or type its name.' },
+  port: {
+    hint: 'Choose the ESP32 face port:',
+    completionHint: 'Press Enter to activate the Fynext ESP32 face.',
+    options: [{ value: 'fynext esp32', description: 'Enable and activate the robot face' }]
+  },
+  model: { hint: 'Press Enter to choose a model, or type its name.' },
+  engine: {
+    hint: 'Choose a local model engine:',
+    options: ['ollama', 'lumen']
+  },
+  gpu: {
+    hint: 'Choose Lumen GPU usage:',
+    completionHint: 'Press Enter to save this setting.',
+    options: [
+      { value: 'auto', description: 'Use the GPU when available' },
+      { value: 'cpu', description: 'CPU only; slower but more stable' }
+    ]
+  },
   diff: { hint: 'Optional: enter a file path to filter the diff.' },
   undo: { hint: 'Optional: enter the number of changes to undo.' },
   redo: { hint: 'Optional: enter the number of changes to redo.' },
@@ -72,11 +97,12 @@ const SLASH_ARGUMENTS = {
     options: ['on', 'off']
   },
   export: { hint: 'Optional: enter an output path ending in .md or .json.' },
+  copy: { hint: 'Optional: enter a code block number (default: the last one).' },
   editor: { hint: 'Optional: enter a file path (defaults to AGENTS.md).' },
   keybind: {
     hint: 'Choose an action, then enter a key.',
     completionHint: 'Enter the key for this shortcut.',
-    options: ['palette', 'details', 'new', 'historyPrev', 'historyNext', 'refresh', 'mode']
+    options: ['palette', 'details', 'new', 'historyPrev', 'historyNext', 'refresh', 'copy', 'mode']
   },
   history: { hint: 'Enter a conversation number to open it.' },
   workspace: { hint: 'Enter a workspace directory path.' },
@@ -137,6 +163,7 @@ const KEYBIND_ACTIONS = {
   historyPrev: 'ctrl+up',
   historyNext: 'ctrl+down',
   refresh: 'ctrl+l',
+  copy: 'ctrl+y',
   mode: 'tab'
 };
 
@@ -158,6 +185,7 @@ const CONTROL_KEYS = {
   0x10: 'ctrl+p',
   0x15: 'ctrl+u',
   0x17: 'ctrl+w',
+  0x19: 'ctrl+y',
   0x7f: 'backspace'
 };
 
@@ -440,6 +468,46 @@ class Screen {
       }, duration || 1800);
     }
     this.scheduleRender();
+  }
+
+  _codeBlocks() {
+    const blocks = [];
+    for (const item of this.items) {
+      if (!item || item.kind !== 'assistant' || !item.text) continue;
+      extractCodeBlocks(item.text).forEach((code, blockIndex) => {
+        blocks.push({ item, blockIndex, code });
+      });
+    }
+    return blocks;
+  }
+
+  _copyCode(code) {
+    const value = String(code == null ? '' : code);
+    copyToClipboard(value).then(
+      () => this.setNotice(`Copied ${value.split('\n').length} line(s) to the clipboard`, 1800),
+      (err) => this.setNotice(`Copy failed: ${err && err.message ? err.message : err}`, 3200)
+    );
+  }
+
+  copyCodeBlock(item, blockIndex) {
+    const blocks = item && item.text ? extractCodeBlocks(item.text) : [];
+    const code = blocks[blockIndex];
+    if (code == null) {
+      this.setNotice('No code block to copy', 1800);
+      return false;
+    }
+    this._copyCode(code);
+    return true;
+  }
+
+  copyLastCodeBlock() {
+    const blocks = this._codeBlocks();
+    if (!blocks.length) {
+      this.setNotice('No code block to copy', 1800);
+      return false;
+    }
+    const last = blocks[blocks.length - 1];
+    return this.copyCodeBlock(last.item, last.blockIndex);
   }
 
   setCompletionNotice(text, duration) {
@@ -935,7 +1003,13 @@ class Screen {
       ? config.options()
       : config.options || [];
     const normalizedOptions = options.map((option) =>
-      typeof option === 'string' ? { value: option, label: option, description: '' } : option
+      typeof option === 'string'
+        ? { value: option, label: option, description: '' }
+        : {
+            ...option,
+            label: option.label || option.value,
+            description: option.description || ''
+          }
     );
     const matches = hasAdditionalArguments
       ? []
@@ -1672,8 +1746,11 @@ class Screen {
         if (!inlineCodeBlocks.has(blockIndex)) {
           const label = `${marker} ${fileName}`;
           if (onCodeBlock) onCodeBlock(blockIndex, out.length);
-          out.push('  ' + C.bgPanel + C.accentBright + C.bold +
-            truncateVisible(label, width) + C.reset);
+          const showCopyHint = width >= COPY_HINT_WIDTH + 12;
+          const labelWidth = showCopyHint ? width - COPY_HINT_WIDTH : width;
+          const labelText = truncateVisible(label, Math.max(8, labelWidth));
+          out.push('  ' + C.bgPanel + C.accentBright + C.bold + labelText +
+            (showCopyHint ? C.grayDim + COPY_HINT : '') + C.reset);
         }
         if (expanded) {
           for (const codeLine of code) {
@@ -1690,6 +1767,23 @@ class Screen {
         out.push('  ' + C.grayDim + rawLine + C.reset);
         continue;
       }
+
+      // Handle Markdown tables
+      if (!inCode && trimmed.startsWith('|') && index + 1 < sourceLines.length && isTableSeparator(sourceLines[index + 1])) {
+        const tableLines = [rawLine, sourceLines[index + 1]];
+        let tableIdx = index + 2;
+        while (tableIdx < sourceLines.length && sourceLines[tableIdx].trim().startsWith('|')) {
+          tableLines.push(sourceLines[tableIdx]);
+          tableIdx += 1;
+        }
+        index = tableIdx - 1;
+        const renderedRows = renderTable(tableLines, width);
+        for (const row of renderedRows) {
+          out.push('  ' + row);
+        }
+        continue;
+      }
+
       let displayLine = rawLine;
       let active = inCode ? C.blue : style;
       const codeReference = inlineCodeReferences.get(index);
@@ -1701,26 +1795,24 @@ class Screen {
           marker + ' ' + codeReference.fileName + C.reset + active;
         displayLine = rawLine.replace(codeReference.filePattern, highlightedFile);
       }
+
       if (!inCode) {
-        const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
-        if (heading) {
-          displayLine = heading[2];
-          active = C.accentBright + C.bold;
-        } else if (/^(?:[-*+]\s+|\d+[.)]\s+)/.test(trimmed)) {
-          const listItem = /^(?:[-*+]\s+|\d+[.)]\s+)(.*)$/.exec(trimmed);
-          displayLine = '• ' + (listItem ? listItem[1] : trimmed);
-          active = C.cyan;
-        } else if (/^>\s?/.test(trimmed)) {
-          displayLine = trimmed.replace(/^>\s?/, '│ ');
-          active = C.gray;
+        if (!codeReference) {
+          const md = renderMarkdownLine(displayLine, width, style);
+          displayLine = md.text;
+          active = '';
+        } else {
+          // Keep the highlighted chip intact, render remaining inline markdown
+          displayLine = renderInline(displayLine, active);
         }
       }
+
       const wrapped = wrapText(displayLine, width);
       for (const line of wrapped) {
         if (codeReference && stripAnsi(line).includes(codeReference.fileName) && onCodeBlock) {
           onCodeBlock(codeReference.blockIndex, out.length);
         }
-        out.push('  ' + active + line + C.reset);
+        out.push('  ' + (active ? active : '') + line + C.reset);
       }
     }
     return out;
@@ -1934,6 +2026,12 @@ class Screen {
     const codeTarget = this._codeBlockClickTargets && this._codeBlockClickTargets.get(lineIndex);
     if (codeTarget) {
       const item = codeTarget.item;
+      const plain = stripAnsi(all[lineIndex] || '');
+      const hintIndex = plain.indexOf(COPY_HINT);
+      if (hintIndex >= 0 && col - 2 >= hintIndex) {
+        this.copyCodeBlock(item, codeTarget.blockIndex);
+        return;
+      }
       if (!(item.expandedCodeBlocks instanceof Set)) item.expandedCodeBlocks = new Set();
       if (item.expandedCodeBlocks.has(codeTarget.blockIndex)) {
         item.expandedCodeBlocks.delete(codeTarget.blockIndex);
@@ -2121,6 +2219,7 @@ class Screen {
     }
     if (key === 'wheelup') return this._scrollChat(-1);
     if (key === 'wheeldown') return this._scrollChat(1);
+    if (key === 'ctrl+y') return this.copyLastCodeBlock();
     if (this.pendingConfirm) {
       if (key === 'enter') return this._submit();
       if (key === 'ctrl+c') return this._ctrlC();

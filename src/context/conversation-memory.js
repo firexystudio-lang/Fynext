@@ -67,4 +67,75 @@ function attach(history, conversation) {
   return result;
 }
 
-module.exports = { build, attach };
+function shouldAutoCompact(messages, numCtx = 8192) {
+  if (!Array.isArray(messages) || messages.length < 12) return false;
+  let totalChars = 0;
+  for (const m of messages) {
+    if (!m) continue;
+    totalChars += (m.content ? m.content.length : 0);
+    if (Array.isArray(m.tool_calls)) {
+      totalChars += JSON.stringify(m.tool_calls).length;
+    }
+  }
+  const maxSafeChars = Math.floor(Number(numCtx || 8192) * 2.2);
+  return totalChars > maxSafeChars || messages.length >= 24;
+}
+
+function autoCompactMessages(messages, numCtx = 8192) {
+  if (!shouldAutoCompact(messages, numCtx)) {
+    return { compacted: false, messages };
+  }
+
+  const systemMessage = messages[0] && messages[0].role === 'system' ? messages[0] : null;
+  const nonSystem = systemMessage ? messages.slice(1) : messages.slice();
+
+  const KEEP_RECENT = 6;
+  if (nonSystem.length <= KEEP_RECENT + 2) {
+    return { compacted: false, messages };
+  }
+
+  // Ensure recentMessages begins cleanly with a 'user' message so tool-call chains are never severed
+  let cutIndex = nonSystem.length - KEEP_RECENT;
+  while (cutIndex < nonSystem.length && nonSystem[cutIndex].role !== 'user') {
+    cutIndex++;
+  }
+  if (cutIndex >= nonSystem.length) {
+    cutIndex = nonSystem.length - KEEP_RECENT;
+    while (cutIndex > 0 && nonSystem[cutIndex].role !== 'user') {
+      cutIndex--;
+    }
+  }
+  if (cutIndex <= 0 || cutIndex >= nonSystem.length) {
+    return { compacted: false, messages };
+  }
+
+  const olderMessages = nonSystem.slice(0, cutIndex);
+  const recentMessages = nonSystem.slice(cutIndex);
+
+  const summary = build(olderMessages);
+  if (!summary) {
+    return { compacted: false, messages };
+  }
+
+  const compactedOlder = [
+    {
+      role: 'user',
+      content: `[System Note: Older conversation turns auto-compacted into memory]:\n${summary}`
+    },
+    {
+      role: 'assistant',
+      content: 'Understood. I retain the full context, technical decisions, and file paths from the earlier conversation.'
+    }
+  ];
+
+  const newMessages = systemMessage
+    ? [systemMessage, ...compactedOlder, ...recentMessages]
+    : [...compactedOlder, ...recentMessages];
+
+  return {
+    compacted: true,
+    messages: newMessages
+  };
+}
+
+module.exports = { build, attach, shouldAutoCompact, autoCompactMessages };

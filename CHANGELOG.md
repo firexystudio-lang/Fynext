@@ -2,6 +2,16 @@
 
 All notable changes to Fynext are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Fynext Ported ESP32: expressive robot face firmware for the ESP32-2432S08 (CYD) with animated eyes, eyebrows, blinking, touch gaze and RGB LED moods.
+- USB serial bridge (`src/robot/face-bridge.js`) with auto port detection, reconnect and command throttling.
+- `/face on|off|ports|port|test|emotion|status` command and automatic emotion hooks for agent events.
+- `robotFaceEnabled`, `robotFacePort` and `robotFaceBaud` settings.
+- Firmware documentation in `firmware/fynext-ported-esp32/` and `docs/robot-face.md`.
+
 ## [1.0.0]
 
 ### Added

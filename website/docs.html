@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>doküman — fynext | FirexyTeam</title>
+  <meta name="description" content="Fynext dokümantasyonu: hızlı başlangıç, Lumen ve Ollama motorları, model rehberi, slash komutları ve TUI kısayolları." />
+  <meta name="theme-color" content="#1c1c1c" />
+  <link rel="icon" type="image/png" href="assets/img/fynext-logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+  <a class="skip" href="#main">içeriğe geç</a>
+
+  <header class="topbar">
+    <div class="shell topbar__inner">
+      <a class="brand" href="index.html" aria-label="fynext ana sayfa">
+        <span class="brand__logo">◆</span>
+        <span class="brand__name">fynext</span>
+        <span class="brand__tag">local coding agent</span>
+      </a>
+      <div class="topbar__status">
+        <span class="model">gemma-4-e2b-it-q4_0</span>
+        <span class="sep">·</span>
+        <span class="mode mode--plan">PLAN</span>
+        <span class="sep">·</span>
+        <span>v1.0.0</span>
+      </div>
+    </div>
+    <div class="cmdbar">
+      <div class="shell cmdbar__inner">
+        <span class="cmdbar__prompt">❯</span>
+        <nav class="nav-links" data-nav-links aria-label="Ana menü">
+          <a href="index.html">ana</a>
+          <a href="index.html#features">özellikler</a>
+          <a href="download.html">indir</a>
+          <a href="docs.html" class="active" aria-current="page">doküman</a>
+          <a href="team.html">ekip</a>
+          <a href="team.html#contact">iletişim</a>
+        </nav>
+        <div class="cmdbar__actions">
+          <button class="btn btn--ghost" data-theme-toggle>[tema: koyu]</button>
+          <a href="download.html" class="btn btn--primary">[ indir ]</a>
+          <button class="btn nav-toggle" data-nav-toggle aria-label="Menü" aria-expanded="false">[ menü ]</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-head">
+      <div class="shell">
+        <div class="breadcrumb">
+          <a href="index.html">~/fynext</a><span class="sep">/</span><span>doküman</span>
+        </div>
+        <h1>doküman</h1>
+        <p>Kurulumdan ileri düzey kullanıma kadar her şey. Komutlar, motorlar ve modeller için rehber.</p>
+        <div class="tag-row">
+          <span class="tag tag--accent">v1.0.0</span>
+          <span class="tag">node 20+</span>
+          <span class="tag tag--blue">lumen · ollama</span>
+          <span class="tag tag--green">MIT</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="shell docs-layout">
+      <aside class="docs-side" data-docs-spy>
+        <div class="side-group">
+          <h4>başlangıç</h4>
+          <a href="#quick-start">hızlı başlangıç</a>
+          <a href="#engines">motorlar</a>
+          <a href="#models">modeller</a>
+        </div>
+        <div class="side-group">
+          <h4>kullanım</h4>
+          <a href="#commands">slash komutları</a>
+          <a href="#shortcuts">tui kısayolları</a>
+          <a href="#workflows">iş akışları</a>
+        </div>
+        <div class="side-group">
+          <h4>proje</h4>
+          <a href="#projects">proje yapısı</a>
+        </div>
+        <div class="side-group">
+          <h4>destek</h4>
+          <a href="#troubleshooting">sorun giderme</a>
+          <a href="download.html">indirme sayfası</a>
+        </div>
+      </aside>
+
+      <div class="docs-body">
+        <h2 id="quick-start">hızlı başlangıç</h2>
+        <p>Fynext, terminalde çalışan yerel bir yapay zekâ kod ajanıdır. Kurulum için Node.js 20 veya üzeri gerekir.</p>
+        <div class="code">
+          <div class="code__bar"><span class="code__title">terminal</span><button class="copy" data-copy>[kopyala]</button></div>
+          <pre><span class="c-comment"># 1) global kurulum</span>
+<span class="c-cmd">npm install -g</span> github:firexystudio-lang/Fynext
+
+<span class="c-comment"># 2) proje kökünde başlat</span>
+<span class="c-cmd">cd</span> ~/projects/app
+<span class="c-cmd">fynext</span></pre>
+        </div>
+        <p>İlk çalıştırmada Fynext sizi karşılar ve tercihleri sorar. Ardından Lumen motoruna geçip model seçebilirsiniz:</p>
+        <div class="code">
+          <div class="code__bar"><span class="code__title">fynext</span><button class="copy" data-copy>[kopyala]</button></div>
+          <pre>/engine lumen
+/models
+/model gemma-4-e2b-it-q4_0</pre>
+        </div>
+        <ul class="bullets">
+          <li>Proje kökünde <code>.fynext/project-memory.json</code> oluşturulur ve çalışma alanı indekslenir.</li>
+          <li>Bağlamı azaltmak için <code>/compact</code>, dışa aktarmak için <code>/export</code> kullanın.</li>
+          <li>Yardım için <code>/help</code> yazın veya <code>Ctrl+P</code> ile komut paletini açın.</li>
+        </ul>
+
+        <h2 id="engines">motorlar</h2>
+        <p>Fynext iki yerel çıkarım motoru sunar. Varsayılan motor Ollama'dır; Lumen ise llama.cpp tabanlı gömülü bir alternatiftir.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>motor</th><th>açıklama</th><th>komut</th></tr></thead>
+            <tbody>
+              <tr><td><b>Ollama</b></td><td>Yerel Ollama sunucusundaki modellerle çalışır. Daha büyük modeller için idealdir.</td><td><code>/engine ollama</code></td></tr>
+              <tr><td><b>Lumen</b></td><td>GGUF modellerini doğrudan llama.cpp ile çalıştırır. Ollama gerekmez.</td><td><code>/engine lumen</code></td></tr>
+              <tr><td><b>GPU</b></td><td>Lumen için GPU kullanımını gösterir veya ayarlar.</td><td><code>/gpu auto | cpu</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><code>/gpu cpu</code> seçeneği daha yavaştır ancak bazı sistemlerde daha kararlıdır. Lumen, GPU'yu otomatik algılar ve gerekirse CPU'ya geri döner.</p>
+
+        <h2 id="models">modeller</h2>
+        <p>Model kataloğuna <code>/models</code> ile erişin. Fynext indirme öncesi onay ister, her GGUF dosyasının SHA-256 değerini doğrular ve kesilen indirmeleri sürdürebilir.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>model</th><th>boyut</th><th>not</th></tr></thead>
+            <tbody>
+              <tr><td><code>gemma-4-e2b-it-q4_0</code></td><td>~2.65 GiB</td><td>Varsayılan. Dengeli kalite ve hız.</td></tr>
+              <tr><td><code>qwen2.5-coder-1.5b-q4_k_m</code></td><td>~1.04 GiB</td><td>Kompakt, düşük bellek.</td></tr>
+              <tr><td><code>qwen2.5-coder-1.5b-q5_k_m</code></td><td>~1.20 GiB</td><td>Daha yüksek kalite, hâlâ kompakt.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Modeller kullanıcı yapılandırma dizinindeki <code>models/lumen</code> klasöründe saklanır. Farklı bir konum için <code>FYNEXT_MODEL_DIR</code> ortam değişkenini kullanın. Gemma 4 Apache-2.0 lisansı altındadır.</p>
+        <div class="callout">
+          <div class="callout__title">model seçimi</div>
+          Kompakt modeller hızlıdır ancak karmaşık görevlerde daha büyük Ollama modelleri daha iyi sonuç verebilir. Donanımınıza göre denge kurun.
+        </div>
+
+        <h2 id="commands">slash komutları</h2>
+        <p>Komutları doğrudan yazın veya <code>Ctrl+P</code> / <code>Ctrl+N</code> ile komut paletinden seçin.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>komut</th><th>açıklama</th></tr></thead>
+            <tbody>
+              <tr><td><code>/help</code></td><td>Komutları ve kısayolları listeler.</td></tr>
+              <tr><td><code>/engine [ollama|lumen]</code></td><td>Yerel model motorunu değiştirir.</td></tr>
+              <tr><td><code>/gpu [auto|cpu]</code></td><td>Lumen GPU kullanımını gösterir veya ayarlar.</td></tr>
+              <tr><td><code>/model</code>, <code>/models</code></td><td>Model değiştirir veya indirilebilir modelleri listeler.</td></tr>
+              <tr><td><code>/review</code>, <code>/plan</code>, <code>/build</code>, <code>/mode</code></td><td>İnceleme, planlama veya inşa iş akışları.</td></tr>
+              <tr><td><code>/changes</code>, <code>/undo</code>, <code>/redo</code></td><td>Dosya değişikliklerini inceleyin ve geri alın.</td></tr>
+              <tr><td><code>/diff [yol]</code></td><td>Renkli git diff görünümü.</td></tr>
+              <tr><td><code>/theme [ad]</code></td><td>Temaları listeler veya değiştirir.</td></tr>
+              <tr><td><code>/port fynext esp32</code></td><td>Her sohbet için ESP32 yüzünü etkinleştirir.</td></tr>
+              <tr><td><code>/face [on|off|ports|port|test]</code></td><td>ESP32 robot yüzü köprüsünü yönetir.</td></tr>
+              <tr><td><code>/details on|off</code></td><td>Düşünme detaylarını açar/kapatır.</td></tr>
+              <tr><td><code>/compact</code></td><td>Sohbeti özetleyerek bağlamı azaltır.</td></tr>
+              <tr><td><code>/export [dosya]</code></td><td>Sohbeti Markdown veya JSON olarak aktarır.</td></tr>
+              <tr><td><code>/copy [n]</code></td><td>Son (veya n.) kod bloğunu panoya kopyalar.</td></tr>
+              <tr><td><code>/editor [dosya]</code></td><td>Dosyayı yapılandırılmış editörde açar.</td></tr>
+              <tr><td><code>/init [--force]</code></td><td>Çalışma alanı için <code>AGENTS.md</code> oluşturur.</td></tr>
+              <tr><td><code>/keybind [eylem tuş]</code></td><td>TUI tuş atamalarını gösterir veya değiştirir.</td></tr>
+              <tr><td><code>/history</code>, <code>/new</code>, <code>/clear</code>, <code>/exit</code></td><td>Sohbetleri ve oturumu yönetir.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="shortcuts">tui kısayolları</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>kısayol</th><th>eylem</th></tr></thead>
+            <tbody>
+              <tr><td><code>Enter</code></td><td>İstemi gönderir.</td></tr>
+              <tr><td><code>Tab</code></td><td>Plan ve İnşa modları arasında geçiş yapar.</td></tr>
+              <tr><td><code>Alt+Enter</code> / <code>Ctrl+J</code></td><td>Yeni satır ekler.</td></tr>
+              <tr><td><code>Ctrl+P</code> / <code>Ctrl+N</code></td><td>Komut paletini açar.</td></tr>
+              <tr><td><code>Ctrl+Up</code> / <code>Ctrl+Down</code></td><td>Giriş geçmişinde gezinir.</td></tr>
+              <tr><td><code>Ctrl+T</code></td><td>Düşünme detaylarını açar/kapatır.</td></tr>
+              <tr><td><code>Ctrl+Y</code></td><td>Son kod bloğunu panoya kopyalar.</td></tr>
+              <tr><td><code>Ctrl+O</code></td><td>Yeni bir sohbet başlatır.</td></tr>
+              <tr><td><code>Ctrl+L</code></td><td>Ekranı yeniden çizer.</td></tr>
+              <tr><td><code>Ctrl+C</code></td><td>Çalışan görevi durdurur; boştayken iki kez basınca çıkar.</td></tr>
+              <tr><td><code>!komut</code></td><td>İstemden shell komutu çalıştırır.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="workflows">iş akışları</h2>
+        <p>Sık kullanılan mühendislik görevleri için hazır akışlar:</p>
+        <ul class="bullets">
+          <li><strong>İnceleme ve risk kontrolü:</strong> <code>/project</code> → <code>/review</code> → <code>/git</code></li>
+          <li><strong>İnşa ve doğrulama:</strong> <code>/mode build</code> → <code>npm test</code> → <code>npm run build</code></li>
+          <li><strong>Değişiklik özeti:</strong> <code>/git</code> → <code>git log --oneline -10</code> → özetle</li>
+          <li><strong>PR özeti:</strong> <code>/project</code> → <code>/git</code> → değişen dosyaları incele → etkiyi özetle</li>
+        </ul>
+        <div class="code">
+          <div class="code__bar"><span class="code__title">fynext</span><button class="copy" data-copy>[kopyala]</button></div>
+          <pre><span class="c-comment"># plan modunda güvenli analiz</span>
+<span class="c-cmd">/plan</span> Kimlik doğrulama katmanını incele ve riskleri listele
+
+<span class="c-comment"># onaydan sonra inşa modu</span>
+<span class="c-cmd">/mode build</span> Oturum yenileme akışını düzelt
+
+<span class="c-comment"># değişiklikleri gözden geçir</span>
+<span class="c-cmd">/diff</span>
+<span class="c-cmd">/undo</span>   <span class="c-comment"># gerekirse son değişikliği geri al</span></pre>
+        </div>
+
+        <h2 id="projects">proje yapısı</h2>
+        <p>Fynext kaynak kodu sorumluluklarına göre düzenlenmiştir:</p>
+        <div class="code">
+          <div class="code__bar"><span class="code__title">depo</span><button class="copy" data-copy>[kopyala]</button></div>
+          <pre>bin/            CLI giriş noktası
+src/cli/        ana orkestrasyon ve TUI bağlantısı
+src/agent/      niyet yönlendirme ve araç durumu
+src/ai/         Ollama istemcisi ve araç çağrısı ayrıştırma
+src/tools/      dosya sistemi, git, web ve shell araçları
+src/context/    proje hafızası ve sohbet bağlamı
+src/history/    sohbet geçmişi ve değişiklik takibi
+src/ui/         ekran, tema, metin yardımcıları
+src/config/     varsayılanlar ve ayar kalıcılığı
+src/setup/      ilk çalıştırma kurulumu
+src/workflow/   özellik yol haritası ve iş akışı hazır ayarları
+test/           node:test paketleri ve fikstürler
+config/         sistem istemi ve kullanıcı ayarları</pre>
+        </div>
+
+        <h2 id="troubleshooting">sorun giderme</h2>
+        <ul class="bullets">
+          <li><strong>Node sürümü hatası:</strong> <code>node --version</code> çıktısının 20 veya üzeri olduğundan emin olun.</li>
+          <li><strong>Model indirilemiyor:</strong> Bağlantıyı kontrol edin; Fynext kesilen indirmeleri sürdürebilir. Gerekirse <code>FYNEXT_MODEL_DIR</code> ile farklı bir konum seçin.</li>
+          <li><strong>GPU kararsızlığı:</strong> Lumen için <code>/gpu cpu</code> ile CPU moduna geçin.</li>
+          <li><strong>ESP32 bağlanmıyor:</strong> <code>/face ports</code> ile portu doğrulayın ve doğru portu <code>/face port</code> ile seçin.</li>
+          <li><strong>Termux donması:</strong> Deneysel destek sınırlıdır. Açık işlerinizi kaydedin ve arka plan uygulamalarını kapatın.</li>
+        </ul>
+        <p>Daha fazla yardım için <a class="inline" href="team.html#contact">FirexyTeam ile iletişime geçin</a> veya <a class="inline" href="https://github.com/firexystudio-lang/Fynext/issues" target="_blank" rel="noopener">GitHub'da hata bildirin</a>.</p>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="shell">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="index.html">
+            <span class="brand__logo">◆</span>
+            <span class="brand__name">fynext</span>
+            <span class="brand__tag">local coding agent</span>
+          </a>
+          <p>Yerel çalışan, gizlilik odaklı yapay zekâ kod ajanı. FirexyTeam tarafından geliştirilir ve MIT lisansı altında sunulur.</p>
+          <div class="footer-socials">
+            <a href="https://github.com/firexystudio-lang/Fynext" target="_blank" rel="noopener">[github]</a>
+            <a href="https://firexy.ct.ws" target="_blank" rel="noopener">[firexy.ct.ws]</a>
+            <a href="mailto:mfiretechh@gmail.com">[e-posta]</a>
+          </div>
+        </div>
+        <div class="footer-col">
+          <h4>ürün</h4>
+          <a href="index.html#features">özellikler</a>
+          <a href="download.html">indir</a>
+          <a href="docs.html">dokümantasyon</a>
+          <a href="index.html#faq">sss</a>
+        </div>
+        <div class="footer-col">
+          <h4>kaynaklar</h4>
+          <a href="https://github.com/firexystudio-lang/Fynext" target="_blank" rel="noopener">github</a>
+          <a href="docs.html#commands">komut referansı</a>
+          <a href="docs.html#projects">proje yapısı</a>
+          <a href="https://firexy.ct.ws" target="_blank" rel="noopener">firexyteam</a>
+        </div>
+        <div class="footer-col">
+          <h4>şirket</h4>
+          <a href="team.html">hakkımızda</a>
+          <a href="team.html#contact">iletişim</a>
+          <a href="team.html#contributing">katkı</a>
+          <a href="https://github.com/firexystudio-lang/Fynext/issues" target="_blank" rel="noopener">hata bildir</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© <span data-year>2026</span> FirexyTeam · firexy.ct.ws</span>
+        <span class="made">Made By:FirexyTeam <span class="heart">♥</span></span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/js/main.js"></script>
+</body>
+</html>

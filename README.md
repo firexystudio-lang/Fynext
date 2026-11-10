@@ -13,7 +13,7 @@
 An AI-powered local agent for intelligent code analysis and management.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-1f2937?style=flat-square)
-![Node.js](https://img.shields.io/badge/node-%3E%3D16-339933?style=flat-square&logo=node.js&logoColor=white)
+![Node.js](https://img.shields.io/badge/node-%3E%3D20-339933?style=flat-square&logo=node.js&logoColor=white)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.8-3776AB?style=flat-square&logo=python&logoColor=white)
 ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)
 
@@ -36,6 +36,7 @@ It is an open-source solution that runs securely on your computer.
 | **Intelligent Code Analysis** | Analyzes your codebase and provides suggestions for improvement. |
 | **Project Management** | Understands and organizes your project’s file structure. |
 | **Local Execution** | All processing happens locally; your data never leaves your machine. |
+| **Lumen engine** | Run quantized GGUF models locally with llama.cpp, without requiring Ollama. |
 | **Fast Processing** | Runs fast thanks to optimized performance. |
 | **Targeted Solutions** | Customizable for specific tasks. |
 | **Command Palette** | Search and run slash commands with `Ctrl+P` / `Ctrl+N`. |
@@ -45,20 +46,36 @@ It is an open-source solution that runs securely on your computer.
 | **Themes & Diff View** | Five built-in themes and colored git diffs. |
 | **Collapsible Code** | Keep assistant code compact; click a highlighted filename inline to view or hide its contents. |
 | **Compact & Export** | Summarize context with `/compact`, export chats with `/export`. |
+| **Fynext Ported ESP32** | Drive an ESP32-2432S028 robot face with animated eyes and expressions over USB serial. |
+
+### Fynext Ported ESP32
+
+Fynext can become the brain of a small robot face. The ESP32 renders its face
+while Fynext sends session, task, progress, and response events over USB serial.
+Touch makes the robot look at your finger.
+
+- Firmware: [`firmware/fynext-ported-esp32/`](firmware/fynext-ported-esp32/)
+- Guide: [`docs/robot-face.md`](docs/robot-face.md)
+- Setup: `/port fynext esp32`, `/face ports`, `/face port COM5`
 
 ### Slash commands
 
 | Command | Description |
 | :-- | :-- |
 | `/help` | List commands and shortcuts. |
-| `/model`, `/models` | Switch model or pick a local Ollama model. |
+| `/engine [ollama\|lumen]` | Switch the local model engine. |
+| `/gpu [auto\|cpu]` | Show or set Lumen GPU usage. `cpu` is slower but more stable. |
+| `/model`, `/models` | Switch models or choose a downloadable Lumen GGUF model. |
 | `/review`, `/plan`, `/build`, `/mode` | Review, plan, or build workflows. |
 | `/changes`, `/undo`, `/redo` | Inspect and reverse file changes made by tools. |
 | `/diff [path]` | Show a colored git diff. |
 | `/theme [name]` | List or switch themes. |
+| `/port fynext esp32` | Enable and activate the Fynext ESP32 face for each conversation. |
+| `/face [on\|off\|ports\|port\|test]` | Control the ESP32 robot face bridge. |
 | `/details on\|off` | Toggle thinking details (`Ctrl+T`). |
 | `/compact` | Summarize the conversation to reduce context. |
 | `/export [file]` | Export the conversation as Markdown or JSON. |
+| `/copy [n]` | Copy the last (or nth) code block to the clipboard. |
 | `/editor [file]` | Open a file in the configured editor. |
 | `/init [--force]` | Create or refresh `AGENTS.md` for the workspace. |
 | `/keybind [action key]` | Show or change TUI key bindings. |
@@ -74,6 +91,7 @@ It is an open-source solution that runs securely on your computer.
 | `Ctrl+P` / `Ctrl+N` | Open the command palette. |
 | `Ctrl+Up` / `Ctrl+Down` | Walk through input history. |
 | `Ctrl+T` | Toggle thinking details. |
+| `Ctrl+Y` | Copy the last code block to the clipboard. |
 | `Ctrl+O` | Start a new conversation. |
 | `Ctrl+L` | Redraw the screen. |
 | `Ctrl+C` | Stop the running task; press twice to exit when idle. |
@@ -102,7 +120,7 @@ These additions would make Fynext more useful as an everyday local engineering a
 | Component | Version | Status |
 | :-- | :-- | :-- |
 | Operating system | Windows, Linux, or macOS | Required |
-| Node.js | 16 or later | Required (for npm installation) |
+| Node.js | 20 or later | Required |
 | Python | 3.8 or later | Optional |
 
 ### Installation
@@ -112,6 +130,20 @@ Install Fynext globally via npm:
 ```bash
 npm install -g github:firexystudio-lang/Fynext
 ```
+
+### Using Lumen
+
+Fynext keeps Ollama as the default engine. In the CLI, switch to Lumen and choose a model:
+
+```text
+/engine lumen
+/models
+/model gemma-4-e2b-it-q4_0
+```
+
+Gemma 4 E2B Q4_0 (about 2.65 GiB) is the default Lumen model. The catalog also retains Qwen2.5 Coder 1.5B Q4_K_M (about 1.04 GiB) and Q5_K_M (about 1.20 GiB) as smaller alternatives. Fynext asks before downloading, verifies each GGUF file's SHA-256, and can resume an interrupted download. Gemma 4 is provided under Apache-2.0; see the [model card](https://huggingface.co/google/gemma-4-E2B-it). Lumen uses llama.cpp's native function-calling interface, with automatic GPU detection and CPU fallback. Gemma E2B is a compact model; larger Ollama models may provide stronger results, at the cost of more memory and storage.
+
+Models are stored in the Fynext user configuration directory under `models/lumen`. Set `FYNEXT_MODEL_DIR` to use another location. Ollama remains available with `/engine ollama`.
 
 ### Project structure
 

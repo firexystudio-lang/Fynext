@@ -265,6 +265,20 @@ function toolCallSchema(tools) {
   };
 }
 
+function toolPolicyInstructions() {
+  return [
+    'TOOL POLICY & AUTONOMOUS EXECUTION:',
+    '1. PROACTIVE ACTION: When the user asks about this repository, code, bugs, or architecture, autonomously inspect relevant files with tools before answering. Never wait for permission or ask the user to paste code.',
+    '2. THOROUGH INSPECTION: A directory listing or cached snapshot is not enough. Read actual file contents (using fs_glob, fs_grep, fs_read) before forming conclusions.',
+    '3. BUILD MODE EXECUTION: In BUILD mode, carry out the actual work directly using tools. Do not answer an actionable task with tutorials, pseudo-code, or instructions for the user to do it.',
+    '4. PRECISE CODE MODIFICATIONS:',
+    '   - To create a new file or rewrite an entire file cleanly, use fs_write with full, complete, production-ready content (never use placeholders like "// existing code").',
+    '   - To edit an existing file with fs_edit, you MUST read the file first using fs_read to ensure the search block matches uniquely, including 2-3 lines of surrounding context.',
+    '5. VERIFICATION: After modifying code, run existing tests or validation commands via shell_exec to ensure no syntax errors or regressions exist.',
+    '6. WEB ACCESS & IMMEDIATE EXECUTION: For external information, documentation, or web research, call web_search immediately. NEVER announce "Web araması yapacağım" or "I will search the web" in text; execute the tool call directly without conversational delay. Do not claim lack of internet access when these tools are listed.',
+    '7. HONEST REPORTING: Use only available tools and never hallucinate that a tool was executed when it was not.'
+  ].join('\n');
+}
 function toolInstructions(tools, structured = false) {
   const lines = tools.map((tool) => {
     const fn = tool.function || tool;
@@ -279,13 +293,7 @@ function toolInstructions(tools, structured = false) {
   });
   return [
     '',
-    'TOOL POLICY:',
-    'When the user asks about this repository or its code (including inspection, review, analysis, debugging, or recommendations), inspect relevant files with tools before answering.',
-    'A directory listing or cached project snapshot is not enough for a summary or review. Read actual file contents, including documentation, a manifest, and implementation code when available.',
-    'In BUILD mode, carry out requested work. Do not answer an actionable project request with suggestions, a tutorial, or a request for the user to provide files that are already in the workspace.',
-    'For explicit requests to search or research the web, use web_search; use web_fetch to verify relevant sources. Do not claim web search is unavailable when these tools are listed.',
-    'When creating a new file, call fs_write with path and content; never use fs_edit, which requires an existing search string. If no content was requested, write an empty string. Respect the exact location requested by the user.',
-    'Use the smallest useful sequence: locate relevant files, read them, act if requested, then verify. Do not modify files in PLAN mode.',
+    toolPolicyInstructions(),
     structured
       ? 'You must call one tool now. Return exactly one JSON object with the keys "name" and "arguments". The name must be one of the available tools and arguments must match its parameters. Do not include prose or markdown.'
       : 'If a tool is needed, call it now. Use only this XML call format, with one block per call and no surrounding prose:',
@@ -304,6 +312,38 @@ function toolInstructions(tools, structured = false) {
     'After receiving tool results, use them to finish the task and report only verified findings or changes. Keep the final answer concise and in the user\'s language.'
   ].join('\n');
 }
+function withNativeToolInstructions(messages, tools, forceTool = false) {
+  const toolDescriptions = (tools || []).map((tool) => {
+    const fn = tool.function || tool;
+    if (!fn || !fn.name) return '';
+    const props = (fn.parameters && fn.parameters.properties) || {};
+    const paramNames = Object.keys(props);
+    const paramStr = paramNames.length ? ` (parameters: ${paramNames.join(', ')})` : '';
+    return `- ${fn.name}${paramStr}: ${fn.description || ''}`;
+  }).filter(Boolean);
+
+  const names = tools.map((tool) => {
+    const fn = tool.function || tool;
+    return fn.name;
+  }).filter(Boolean);
+  const instruction = [
+    toolPolicyInstructions(),
+    forceTool
+      ? `You must call one available function now. Choose only from: ${names.join(', ')}.`
+      : `Available functions:\n${toolDescriptions.join('\n')}\nUse an available function whenever needed to inspect files, edit code, run commands, or search. The function schemas and descriptions are provided by the chat runtime.`,
+    'After the function results are returned, continue the task and report only verified findings or changes. Keep the final answer concise and in the user\'s language.'
+  ].join('\n');
+  let injected = false;
+  const out = messages.map((message) => {
+    if (!injected && message.role === 'system') {
+      injected = true;
+      return { ...message, content: `${message.content || ''}\n${instruction}` };
+    }
+    return message;
+  });
+  if (!injected) out.unshift({ role: 'system', content: instruction });
+  return out;
+}
 function withToolInstructions(messages, tools, structured = false) {
   const instr = toolInstructions(tools, structured);
   let injected = false;
@@ -319,6 +359,7 @@ function withToolInstructions(messages, tools, structured = false) {
 }
 
 async function modelSupportsTools(cfg) {
+  if (cfg.provider === 'lumen') return false;
   const key = cfg.model;
   if (toolSupportCache.has(key)) return toolSupportCache.get(key);
   let supported = false;
@@ -452,6 +493,9 @@ async function doRequest(cfg, messages, tools, signal, format) {
 }
 
 async function chat(cfg, messages, tools, onDelta, chatOptions = {}) {
+  if (cfg.provider === 'lumen') {
+    return require('../lumen').chat(cfg, messages, tools, onDelta, chatOptions);
+  }
   const validNames = toolNamesOf(tools);
   const forceTool = chatOptions.forceTool === true;
   let structuredToolCall = chatOptions.structuredToolCall === true;
@@ -579,6 +623,9 @@ async function chat(cfg, messages, tools, onDelta, chatOptions = {}) {
 }
 
 async function listModels(cfg) {
+  if (cfg.provider === 'lumen') {
+    return require('../lumen').listModels(cfg);
+  }
   try {
     const res = await fetch(cfg.ollamaUrl.replace(/\/$/, '') + '/api/tags', {
       signal: AbortSignal.timeout(8000)
@@ -592,12 +639,18 @@ async function listModels(cfg) {
 }
 
 async function listAvailableModels(cfg) {
+  if (cfg.provider === 'lumen') {
+    return require('../lumen').listAvailableModels();
+  }
   const models = await listModels(cfg);
   if (!models.length) throw new Error('Could not list Ollama models. Is Ollama running?');
   return models.sort((a, b) => a.localeCompare(b));
 }
 
 async function warmup(cfg) {
+  if (cfg.provider === 'lumen') {
+    return require('../lumen').warmup(cfg);
+  }
   try {
     const res = await fetch(cfg.ollamaUrl.replace(/\/$/, '') + '/api/generate', {
       method: 'POST',
@@ -625,5 +678,8 @@ module.exports = {
   warmup,
   trimMessages,
   extractToolCalls,
-  toolCallSchema
+  toolCallSchema,
+  toolPolicyInstructions,
+  withToolInstructions,
+  withNativeToolInstructions
 };

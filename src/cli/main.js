@@ -7,18 +7,23 @@ const { spawnSync } = require('child_process');
 const pkg = require('../../package.json');
 const { loadConfig, loadSystemPrompt, saveSettingsPatch } = require('../config');
 const llm = require('../ai/llm');
+const lumen = require('../lumen');
 const tools = require('../tools');
 const setup = require('../setup');
 const projectContext = require('../context/project-context');
 const { Screen, sanitize } = require('../ui/screen');
+const { copyToClipboard, extractCodeBlocks } = require('../ui/clipboard');
 const { PlainPresenter } = require('../ui/plain');
 const chatHistory = require('../history/chat-history');
 const changeTracker = require('../history/change-tracker');
-const { requiresToolFollowThrough, requiresWebSearch, requiresImplementation } = require('../agent/task-intent');
-const { describeToolAction, liveStatusFromText, stripStatusLine, StatusStreamFilter } = require('../agent/tool-status');
+const { requiresToolFollowThrough, requiresWebSearch, promisesWebSearch, requiresImplementation } = require('../agent/task-intent');
+const { resolveMentions } = require('../context/mention-resolver');
+const { autoCompactMessages } = require('../context/conversation-memory');
+const { describeToolAction, liveStatusFromText, stripStatusInstructions, stripStatusLine, StatusStreamFilter } = require('../agent/tool-status');
 const featureRoadmap = require('../workflow/feature-roadmap');
 const theme = require('../ui/theme');
 const { playCompletionSound, showCompletionNotification } = require('../ui/completion-sound');
+const faceBridge = require('../robot/face-bridge');
 
 const MAX_CALLS = 30;
 
@@ -26,7 +31,9 @@ const COMMAND_HELP = [
   'Commands:',
   '  /help                   Show this help',
   '  /model [name]           Select or switch the model',
-  '  /models                 Select a local Ollama model',
+  '  /models                 Select a local model for the current engine',
+  '  /engine [ollama|lumen]  Switch the local model engine',
+  '  /gpu [auto|cpu]         Show or set Lumen GPU usage (cpu is more stable)',
   '  /usage                  Show session token usage',
   '  /tools                  List available tools',
   '  /project, /memory       Show or refresh project context',
@@ -48,9 +55,12 @@ const COMMAND_HELP = [
   '  /undo [count]           Undo recent file changes',
   '  /redo [count]           Redo undone file changes',
   '  /theme [name]           Show or change the theme (default restores Fynext)',
+  '  /port fynext esp32      Enable and activate the Fynext ESP32 face',
+  '  /face on|off|ports|port|test Control the ESP32 robot face',
   '  /details on|off         Show or hide thinking details',
   '  /compact                Summarize the conversation context',
   '  /export [file]          Export the conversation as Markdown or JSON',
+  '  /copy [n]               Copy the last (or nth) code block to the clipboard',
   '  /editor [file]          Open a file in an external editor (default: AGENTS.md)',
   '  /init [--force]         Create AGENTS.md for the workspace',
   '  /keybind [action key]   Show or change a keyboard shortcut',
@@ -70,6 +80,7 @@ const COMMAND_HELP = [
   '  @file                 Attach file context to a message',
   '  !command              Run a shell command',
   '  Ctrl+T                Toggle thinking details',
+  '  Ctrl+Y                Copy the last code block to the clipboard',
   '  Ctrl+O                Start a new conversation',
   '  /keybind              Customize keyboard shortcuts',
   '  Ctrl+A / Ctrl+E       Move to the start or end of the line',
@@ -112,6 +123,7 @@ const FLAG_HELP = [
   '  @file                 Attach file context',
   '  !command              Run a shell command',
   '  Ctrl+O                Start a new conversation',
+  '  Ctrl+Y                Copy the last code block',
   '  Ctrl+L                Redraw the screen'
 ].join('\n');
 
@@ -345,7 +357,10 @@ function buildSystemPrompt(cfg, base, mode) {
           '- Do not claim completion or verification without successful tool results.'
         ])
   ].join('\n');
-  return `${String(base || '').trim()}\n${env}`;
+  const promptBase = cfg.provider === 'lumen'
+    ? stripStatusInstructions(base)
+    : String(base || '');
+  return `${promptBase.trim()}\n${env}`;
 }
 
 async function main() {
@@ -435,6 +450,9 @@ async function main() {
 
   if (typeof presenter.setKeybinds === 'function') presenter.setKeybinds(cfg.keybinds);
 
+  const face = faceBridge.createFaceBridge(cfg);
+  face.start();
+
   let historyFile = null;
   let conversations = [];
   let currentConversation = null;
@@ -480,6 +498,11 @@ async function main() {
     exiting = true;
     if (activeController) activeController.abort();
     try {
+      face.close();
+    } catch (_) {
+      /* yoksay */
+    }
+    try {
       presenter.stop();
     } catch (_) {
       /* yoksay */
@@ -524,6 +547,7 @@ async function main() {
     currentConversation = chatHistory.createConversation();
     messages = [{ role: 'system', content: systemPrompt }];
     presenter.reset();
+    face.startSession();
     presenter.setNotice('New conversation started');
   }
 
@@ -597,9 +621,24 @@ async function main() {
 
   function setThinkingStatus(status) {
     if (typeof presenter.thinkingStatus === 'function') presenter.thinkingStatus(status);
+    face.task('thinking', status);
+  }
+
+  function faceTaskForTool(name, action) {
+    if (['web_search', 'web_fetch', 'fs_glob', 'fs_grep'].includes(name)) {
+      return { status: 'searching', direction: 'up_left' };
+    }
+    if (['fs_write', 'fs_edit', 'fs_delete', 'fs_move', 'fs_mkdir'].includes(name)) {
+      return { status: 'coding', direction: 'down_right' };
+    }
+    if (/tests|build|code checks/i.test(action)) {
+      return { status: 'testing', direction: 'right' };
+    }
+    return { status: 'tool', direction: 'center' };
   }
 
   function notifyComplete() {
+    face.celebrate();
     if (!cfg.notifications || !process.stdout.isTTY) return;
     if (interactive && typeof presenter.setCompletionNotice === 'function') {
       presenter.setCompletionNotice('Response complete — Windows notification and sound', 5000);
@@ -640,6 +679,7 @@ async function main() {
     const result = await llm.chat(cfg, history, availableTools, (delta) => {
       const chunk = String(delta);
       streamedChars += chunk.length;
+      face.speak(Math.min(1, 0.45 + chunk.length / 120));
       if (statusFilter) {
         const visible = statusFilter.push(chunk);
         if (statusFilter.status && statusFilter.status !== liveStatus) {
@@ -689,15 +729,31 @@ async function main() {
   }
 
   async function runAgent() {
+    if (cfg.provider === 'lumen') {
+      const model = lumen.getModel(cfg.model);
+      if (!model) {
+        throw new Error(`Unknown Lumen model "${cfg.model}". Choose one with /models.`);
+      }
+      if (!await lumen.isModelInstalled(cfg, model) && !await installModel(model.id)) {
+        throw new Error(`Lumen model "${model.name}" is required. Run /model ${model.id} to try again.`);
+      }
+    }
     activeController = new AbortController();
     cfg.abortSignal = activeController.signal;
+
+    const compactResult = autoCompactMessages(messages, cfg.numCtx);
+    if (compactResult.compacted) {
+      messages.length = 0;
+      messages.push(...compactResult.messages);
+      presenter.note('Context window optimized (auto-compacted older turns).');
+    }
     const currentRequest = messages[messages.length - 1];
     const requiresWebTools = currentRequest &&
       currentRequest.role === 'user' &&
       requiresWebSearch(currentRequest.content);
     const requiresTools = currentRequest &&
       currentRequest.role === 'user' &&
-      ((mode === 'build' && requiresToolFollowThrough(currentRequest.content)) || requiresWebTools);
+      (requiresToolFollowThrough(currentRequest.content) || requiresWebTools);
     const requestTools = tools.definitionsForRequest(
       mode,
       currentRequest && currentRequest.role === 'user' ? currentRequest.content : ''
@@ -732,11 +788,13 @@ async function main() {
           : 'Reviewing tool results and choosing the next step');
         let out;
         try {
+          const mustForceTool = (requiresTools && !executedTool) ||
+            (requiresImplementationWork && mutationVersion === 0 && executedTool && toolRetries > 0);
           out = await chatWithUsage(
             retryHistory || messages,
             requestTools,
             !requiresTools || executedTool,
-            requiresTools && !executedTool ? { forceTool: true } : undefined
+            mustForceTool ? { forceTool: true } : undefined
           );
         } catch (err) {
           presenter.assistantDone();
@@ -763,6 +821,29 @@ async function main() {
           messages.push(message);
         }
         if (!calls.length) {
+          if (promisesWebSearch(content) && toolRetries < 2) {
+            toolRetries += 1;
+            // Ensure web_search and web_fetch are available in requestTools
+            const webToolDefs = tools.definitions.filter((d) =>
+              d && d.function && (d.function.name === 'web_search' || d.function.name === 'web_fetch')
+            );
+            for (const def of webToolDefs) {
+              if (!requestTools.some((t) => (t.function ? t.function.name : t.name) === def.function.name)) {
+                requestTools.push(def);
+              }
+            }
+            const retryMessages = retryHistory || messages;
+            retryHistory = retryMessages.concat(
+              ...(content ? [{ role: 'assistant', content }] : []),
+              {
+                role: 'user',
+                content:
+                  'SYSTEM: You stated that you would search the web or check documentation online, but you did not execute any tool call. DO NOT tell the user what you will do in the future. Execute the web_search tool NOW with your specific search query.'
+              }
+            );
+            presenter.note(`Enforcing web search tool execution (${toolRetries}/2)`);
+            continue;
+          }
           if (requiresTools && !executedTool) {
             if (toolRetries < 2) {
               toolRetries += 1;
@@ -786,6 +867,20 @@ async function main() {
             messages.push({ role: 'assistant', content: warning });
             return warning;
           }
+          if (requiresImplementationWork && mutationVersion === 0 && toolRetries < 2) {
+            toolRetries += 1;
+            const retryMessages = retryHistory || messages;
+            retryHistory = retryMessages.concat(
+              ...(content ? [{ role: 'assistant', content }] : []),
+              {
+                role: 'user',
+                content:
+                  'SYSTEM: You are in BUILD mode and were asked to implement or modify code. You have inspected files, but you have not made any edits yet. Do not merely suggest code or explain steps in chat. Use fs_write or fs_edit now to apply the changes directly to the project files.'
+              }
+            );
+            presenter.note(`Enforcing code implementation in BUILD mode (${toolRetries}/2)`);
+            continue;
+          }
           if (failedCheck && (modifiedSinceCheck || requiresImplementationWork) && checkRetries < 2) {
             checkRetries += 1;
             if (content) messages.push({ role: 'assistant', content });
@@ -805,7 +900,9 @@ async function main() {
         let overLimit = false;
         let firstAction = true;
         const roundSeen = new Set();
-        for (const call of calls) {
+        for (let toolIndex = 0; toolIndex < calls.length; toolIndex += 1) {
+          const call = calls[toolIndex];
+          const toolProgress = Math.round((toolIndex / calls.length) * 100);
           const signature = callSignature(cfg, call);
           if (roundSeen.has(signature)) {
             presenter.note(`Skipped duplicate tool call: ${call.name}`);
@@ -815,6 +912,7 @@ async function main() {
               tool_call_id: call.id,
               content: 'WARNING: This tool call already ran in this turn. Use its result.'
             });
+            face.progress(Math.round(((toolIndex + 1) / calls.length) * 100));
             continue;
           }
           roundSeen.add(signature);
@@ -828,6 +926,7 @@ async function main() {
               content: 'SKIPPED: Tool call limit reached.'
             });
             overLimit = true;
+            face.progress(Math.round(((toolIndex + 1) / calls.length) * 100));
             continue;
           }
 
@@ -842,6 +941,7 @@ async function main() {
               content:
                 'WARNING: This tool already ran with the same arguments and no files have changed since. Use its result and provide your final answer; do not call it again.'
             });
+            face.progress(Math.round(((toolIndex + 1) / calls.length) * 100));
             continue;
           }
           seen.set(signature, { count, version: mutationVersion });
@@ -850,7 +950,12 @@ async function main() {
             ? aiStatus
             : describeToolAction(call.name, call.arguments);
           firstAction = false;
-          setThinkingStatus(action);
+          if (typeof presenter.thinkingStatus === 'function') presenter.thinkingStatus(action);
+          const faceTask = faceTaskForTool(call.name, action);
+          face.task(faceTask.status, action, {
+            progress: toolProgress,
+            direction: faceTask.direction
+          });
           presenter.toolStart(call.name, call.arguments, action);
           let resultText;
           let ok = true;
@@ -869,6 +974,11 @@ async function main() {
               changeHistory.push(entry);
               if (changeHistory.length > MAX_CHANGE_HISTORY) changeHistory.shift();
               redoHistory.length = 0;
+              for (const file of entry.files) {
+                if (file.diff) {
+                  presenter.note(`Diff preview (${path.basename(file.path)}):\n${file.diff}`);
+                }
+              }
             }
           }
           if (ok && mutationTools.has(call.name)) {
@@ -913,6 +1023,10 @@ async function main() {
             tool_call_id: call.id,
             content: String(resultText == null ? '' : resultText)
           });
+          const completedProgress = Math.round(((toolIndex + 1) / calls.length) * 100);
+          face.event(ok ? 'tool_end' : 'tool_error', ok ? 'Action complete' : 'Action failed', {
+            progress: completedProgress
+          });
         }
 
         if (overLimit) {
@@ -952,17 +1066,51 @@ async function main() {
   async function installModel(name) {
     const list = await llm.listModels(cfg);
     if (setup.hasModel(list, name)) return true;
+    const lumenModel = cfg.provider === 'lumen' ? lumen.getModel(name) : null;
+    if (cfg.provider === 'lumen' && !lumenModel) {
+      presenter.error(`Unknown Lumen model: ${name}`);
+      return false;
+    }
+    if (lumenModel) {
+      const accepted = await presenter.confirm(
+        `Download ${lumenModel.name} (${setup.formatBytes(lumenModel.size)}) from Hugging Face?\n` +
+        `License: ${lumenModel.license}\n` +
+        `The model will be saved to: ${cfg.lumenModelDir}`,
+        { approval: true, allowAlways: false }
+      );
+      if (!accepted) {
+        presenter.note('Model download cancelled.');
+        return false;
+      }
+    }
     presenter.setBusy(true);
     presenter.setInfo({ status: 'Downloading model' });
     let lastPct = -1;
+    const controller = cfg.provider === 'lumen' ? new AbortController() : null;
+    if (controller) {
+      activeController = controller;
+      cfg.abortSignal = controller.signal;
+    }
     try {
-      await setup.pullModel(cfg, name, (event) => {
-        if (!event.total || event.completed == null) return;
-        const pct = Math.floor((event.completed / event.total) * 100);
-        if (pct === lastPct) return;
-        lastPct = pct;
-        presenter.setInfo({ status: `Downloading model ${pct}%` });
-      });
+      if (cfg.provider === 'lumen') {
+        await lumen.downloadModel(cfg, name, (event) => {
+          if (!event.total || event.completed == null) return;
+          const pct = Math.floor((event.completed / event.total) * 100);
+          if (pct === lastPct) return;
+          lastPct = pct;
+          presenter.setInfo({
+            status: `Downloading Lumen model ${pct}% (${setup.formatBytes(event.completed)} / ${setup.formatBytes(event.total)})`
+          });
+        }, { signal: controller.signal });
+      } else {
+        await setup.pullModel(cfg, name, (event) => {
+          if (!event.total || event.completed == null) return;
+          const pct = Math.floor((event.completed / event.total) * 100);
+          if (pct === lastPct) return;
+          lastPct = pct;
+          presenter.setInfo({ status: `Downloading model ${pct}%` });
+        });
+      }
       return true;
     } catch (err) {
       if (typeof presenter.showCommandResult === 'function') {
@@ -972,6 +1120,10 @@ async function main() {
       }
       return false;
     } finally {
+      if (controller) {
+        if (activeController === controller) activeController = null;
+        cfg.abortSignal = null;
+      }
       presenter.setBusy(false);
       presenter.setInfo({ status: mode });
     }
@@ -999,6 +1151,81 @@ async function main() {
 
     if (['help', 'yardım', 'yardim', '?', 'h'].includes(cmd)) {
       commandNote(COMMAND_HELP);
+      return;
+    }
+
+    if (cmd === 'port') {
+      if (arg.toLowerCase() !== 'fynext esp32') {
+        commandError('Usage: /port fynext esp32');
+        return;
+      }
+      if (!face.available) {
+        commandError(face.error || 'serialport module is not installed. Run: npm install serialport');
+        return;
+      }
+      saveSettingsPatch({ robotFaceEnabled: true });
+      face.setEnabled(true);
+      face.activate();
+      commandNote(
+        'Fynext ESP32 face enabled. It will reactivate for each new or restored conversation. ' +
+        'If auto-detection selects the wrong port, use /face ports and /face port COM5.'
+      );
+      return;
+    }
+
+    if (['engine', 'provider', 'motor'].includes(cmd)) {
+      if (!arg) {
+        commandNote(`Model engine: ${cfg.provider}\nOptions: ollama, lumen\nUse /engine <name> to switch.`);
+        return;
+      }
+      const provider = arg.toLowerCase();
+      if (!['ollama', 'lumen'].includes(provider)) {
+        commandError(`Unknown model engine: ${arg}. Options: ollama, lumen.`);
+        return;
+      }
+      if (provider === cfg.provider) {
+        commandNote(`Model engine is already ${provider}.`);
+        return;
+      }
+      let selectedModel = cfg.model;
+      if (provider === 'lumen') {
+        if (!lumen.getModel(selectedModel)) selectedModel = lumen.DEFAULT_MODEL_ID;
+      } else if (lumen.getModel(cfg.model)) {
+        selectedModel = 'qwen2.5-coder:7b';
+      }
+      saveSettingsPatch({ provider, model: selectedModel });
+      cfg.provider = provider;
+      cfg.model = selectedModel;
+      presenter.setInfo({ model: cfg.model });
+      commandNote(
+        provider === 'lumen'
+          ? `Model engine: Lumen\nChoose a model with /models.`
+          : `Model engine: Ollama\nChoose a model with /models. If Ollama was not running when Fynext started, restart Fynext to initialize it.`
+      );
+      return;
+    }
+
+    if (['gpu', 'ekran-kartı', 'ekran-karti'].includes(cmd)) {
+      if (!arg) {
+        commandNote(
+          `Lumen GPU: ${cfg.lumenGpu}\nUse /gpu auto or /gpu cpu (cpu is slower but more stable).`
+        );
+        return;
+      }
+      const value = arg.toLowerCase();
+      if (!['auto', 'cpu'].includes(value)) {
+        commandError('Usage: /gpu auto|cpu');
+        return;
+      }
+      cfg.lumenGpu = value;
+      saveSettingsPatch({ lumenGpu: value });
+      if (value === 'auto' && typeof lumen.resetGpuPreference === 'function') {
+        lumen.resetGpuPreference();
+      }
+      commandNote(
+        `Lumen GPU: ${value}${value === 'cpu' ? ' (CPU only)' : ''}\n` +
+          'This applies the next time the model is loaded.'
+      );
       return;
     }
 
@@ -1043,6 +1270,7 @@ async function main() {
       messages = [{ role: 'system', content: systemPrompt }].concat(currentConversation.messages);
       presenter.reset();
       presenter.restoreConversation(messages.slice(1));
+      face.startSession();
       commandNote(`Conversation loaded: ${currentConversation.title || 'Untitled conversation'}`);
       return;
     }
@@ -1099,6 +1327,75 @@ async function main() {
       saveSettingsPatch({ theme: cfg.theme });
       if (typeof presenter.render === 'function') presenter.render();
       commandNote(`Theme: ${cfg.theme}`);
+      return;
+    }
+
+    if (['face', 'yüz', 'yuz'].includes(cmd)) {
+      const sub = (parts[0] || '').toLowerCase();
+      const subArg = parts.slice(1).join(' ').trim();
+      if (!sub) {
+        const info = face.describe();
+        const lines = [
+          `Robot face: ${info.enabled ? 'enabled' : 'disabled'}`,
+          `Port: ${info.port}${info.connected ? ' (connected)' : ''}`,
+          `serialport: ${info.available ? 'available' : 'missing'}`
+        ];
+        if (info.error) lines.push(`Last error: ${info.error}`);
+        if (info.lastEvent) lines.push(`Last event: ${JSON.stringify(info.lastEvent)}`);
+        commandNote(lines.join('\n'));
+        return;
+      }
+      if (sub === 'on' || sub === 'off') {
+        const enabled = sub === 'on';
+        saveSettingsPatch({ robotFaceEnabled: enabled });
+        face.setEnabled(enabled);
+        if (enabled) face.activate();
+        commandNote(`Robot face ${enabled ? 'enabled' : 'disabled'}.`);
+        return;
+      }
+      if (sub === 'ports') {
+        try {
+          const ports = await faceBridge.listPorts();
+          if (!ports.length) {
+            commandNote('No serial ports found.');
+            return;
+          }
+          commandNote(
+            ports
+              .map((port) => {
+                const label = port.friendlyName || port.manufacturer || 'serial device';
+                return `${port.path} — ${label}`;
+              })
+              .join('\n')
+          );
+        } catch (err) {
+          commandError(err.message);
+        }
+        return;
+      }
+      if (sub === 'port') {
+        if (!subArg) {
+          commandError('Usage: /face port COM5');
+          return;
+        }
+        saveSettingsPatch({ robotFacePort: subArg });
+        face.setPort(subArg);
+        commandNote(`Robot face port: ${subArg}`);
+        return;
+      }
+      if (sub === 'test' || sub === 'emotion') {
+        const name = subArg || 'happy';
+        face.emotion(name);
+        commandNote(`Robot face expression: ${name}`);
+        return;
+      }
+      if (sub === 'status') {
+        const name = subArg || 'thinking';
+        face.status(name);
+        commandNote(`Robot face status: ${name}`);
+        return;
+      }
+      commandError('Usage: /face [on|off|ports|port <path>|test <emotion>|emotion <name>|status <name>]');
       return;
     }
 
@@ -1177,6 +1474,39 @@ async function main() {
       return;
     }
 
+    if (['copy', 'kopyala'].includes(cmd)) {
+      const blocks = [];
+      for (const message of messages) {
+        if (!message || message.role !== 'assistant') continue;
+        blocks.push(...extractCodeBlocks(message.content || ''));
+      }
+      if (!blocks.length) {
+        if (typeof presenter.setNotice === 'function') presenter.setNotice('No code block to copy.', 2000);
+        else commandError('No code block to copy.');
+        return;
+      }
+      let position = blocks.length - 1;
+      if (arg) {
+        const count = Number(arg);
+        if (!Number.isInteger(count) || count < 1 || count > blocks.length) {
+          commandError(`Enter a code block number between 1 and ${blocks.length}.`);
+          return;
+        }
+        position = blocks.length - count;
+      }
+      try {
+        await copyToClipboard(blocks[position]);
+        const lines = blocks[position].split('\n').length;
+        const message =
+          `Copied code block ${blocks.length - position} of ${blocks.length} to the clipboard (${lines} lines).`;
+        if (typeof presenter.setNotice === 'function') presenter.setNotice(message, 2400);
+        else commandNote(message);
+      } catch (err) {
+        commandError(`Could not copy to the clipboard: ${err.message}`);
+      }
+      return;
+    }
+
     if (['editor', 'düzenle', 'duzenle'].includes(cmd)) {
       const target = path.resolve(cfg.workspace, arg || 'AGENTS.md');
       try {
@@ -1232,7 +1562,7 @@ async function main() {
     }
 
     if (['keybind', 'kısayol', 'kisayol'].includes(cmd)) {
-      const actions = ['palette', 'details', 'new', 'historyPrev', 'historyNext', 'refresh', 'mode'];
+      const actions = ['palette', 'details', 'new', 'historyPrev', 'historyNext', 'refresh', 'copy', 'mode'];
       if (!arg) {
         const lines = actions.map((action) => {
           const value = cfg.keybinds && cfg.keybinds[action];
@@ -1290,30 +1620,51 @@ async function main() {
     if (['model', 'models', 'modeller'].includes(cmd)) {
       let requestedModel = arg;
       if (!requestedModel) {
-        let availableModels;
-        presenter.setBusy(true);
-        presenter.setInfo({ status: 'Loading models' });
-        try {
-          availableModels = await llm.listAvailableModels(cfg);
-        } catch (err) {
-          commandError(`Could not list models: ${err.message}`);
-          return;
-        } finally {
-          presenter.setBusy(false);
-          presenter.setInfo({ status: mode });
-        }
-        if (typeof presenter.selectOption === 'function') {
-          requestedModel = await presenter.selectOption(
-            'Select a local Ollama model',
-            availableModels,
-            cfg.model
-          );
-          if (!requestedModel) return;
+        if (cfg.provider === 'lumen') {
+          const availableModels = await llm.listAvailableModels(cfg);
+          if (typeof presenter.selectOption === 'function') {
+            requestedModel = await presenter.selectOption(
+              'Select a Lumen GGUF model',
+              availableModels,
+              cfg.model
+            );
+            if (!requestedModel) return;
+          } else {
+            commandNote(
+              'Lumen models:\n' +
+              lumen.MODELS.map((model) =>
+                `  ${model.id} — ${model.name}, ${setup.formatBytes(model.size)}, ${model.license}`
+              ).join('\n') +
+              '\nDownloads require confirmation. Choose a model with /model <id>.'
+            );
+            return;
+          }
         } else {
-          commandNote(
-            `Local models:\n${availableModels.map((name) => `${name === cfg.model ? '* ' : '  '}${name}`).join('\n')}\nSelect one with /model <name>.`
-          );
-          return;
+          let availableModels;
+          presenter.setBusy(true);
+          presenter.setInfo({ status: 'Loading models' });
+          try {
+            availableModels = await llm.listAvailableModels(cfg);
+          } catch (err) {
+            commandError(`Could not list models: ${err.message}`);
+            return;
+          } finally {
+            presenter.setBusy(false);
+            presenter.setInfo({ status: mode });
+          }
+          if (typeof presenter.selectOption === 'function') {
+            requestedModel = await presenter.selectOption(
+              'Select a local Ollama model',
+              availableModels,
+              cfg.model
+            );
+            if (!requestedModel) return;
+          } else {
+            commandNote(
+              `Local models:\n${availableModels.map((name) => `${name === cfg.model ? '* ' : '  '}${name}`).join('\n')}\nSelect one with /model <name>.`
+            );
+            return;
+          }
         }
       }
       const installed = await installModel(requestedModel);
@@ -1540,8 +1891,17 @@ async function main() {
       return;
     }
 
-    messages.push({ role: 'user', content: input });
+    const { text: enrichedInput, attached } = resolveMentions(cfg.workspace, input, {
+      allowOutsideWorkspace: cfg.allowOutsideWorkspace
+    });
+    if (attached && attached.length) {
+      const summary = attached.map((a) => a.path).join(', ');
+      presenter.note(`Attached context: ${summary}`);
+    }
+
+    messages.push({ role: 'user', content: enrichedInput });
     presenter.user(input);
+    face.task('listening', 'Listening');
     try {
       persistConversation();
     } catch (err) {
@@ -1556,8 +1916,13 @@ async function main() {
       if (!answer) presenter.note('The model returned an empty response.');
       else completed = true;
     } catch (err) {
-      if (isAbort(err)) presenter.note('Stopped.');
-      else presenter.error(err && err.message ? err.message : String(err));
+      if (isAbort(err)) {
+        face.emotion('idle');
+        presenter.note('Stopped.');
+      } else {
+        face.emotion('sad');
+        presenter.error(err && err.message ? err.message : String(err));
+      }
     } finally {
       try {
         persistConversation();
@@ -1603,7 +1968,7 @@ async function main() {
   if (interactive || plainRepl) {
     presenter.start();
     await loadStartupConversation();
-    llm.warmup(cfg).catch(() => {});
+    if (cfg.provider === 'ollama') llm.warmup(cfg).catch(() => {});
     if (plainRepl) {
       presenter.note(`fynext ${pkg.version}  ·  ${cfg.model}  ·  ${cfg.workspace}`);
       presenter.note('Type /help to see available commands.');

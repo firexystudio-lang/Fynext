@@ -6,6 +6,7 @@ const {
   describeToolAction,
   isStatusLine,
   liveStatusFromText,
+  stripStatusInstructions,
   stripStatusLine,
   StatusStreamFilter
 } = require('../../src/agent/tool-status');
@@ -24,6 +25,20 @@ test('turns tool calls into human-readable English status lines', () => {
   );
   assert.equal(describeToolAction('fs_grep', { pattern: 'math.add' }), 'Searching file contents for “math.add”');
   assert.match(describeToolAction('fs_read', { path: 'C:/project/src/math.js' }), /^Reading …\/src\/math\.js$/);
+});
+
+test('removes STATUS instructions while keeping the rest of a system prompt', () => {
+  const prompt = [
+    'You are Fynext.',
+    '- Only when you are about to call a tool, start your response with exactly one line in this format: STATUS: <short status>.',
+    'Use tools to inspect the workspace.',
+    '- Put STATUS on its own line, then call the tool.'
+  ].join('\n');
+  const stripped = stripStatusInstructions(prompt);
+
+  assert.doesNotMatch(stripped, /STATUS/);
+  assert.match(stripped, /You are Fynext\./);
+  assert.match(stripped, /Use tools to inspect the workspace\./);
 });
 
 test('rejects JSON, tool names, and multi-line text as AI status lines', () => {

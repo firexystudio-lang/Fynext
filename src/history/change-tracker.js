@@ -94,6 +94,52 @@ function lineCounts(before, after) {
   };
 }
 
+function generateDiff(beforeBuffer, afterBuffer, filePath, maxLines = 16) {
+  const oldText = beforeBuffer && beforeBuffer.length ? beforeBuffer.toString('utf8') : '';
+  const newText = afterBuffer && afterBuffer.length ? afterBuffer.toString('utf8') : '';
+  if (oldText === newText) return '';
+
+  const oldLines = oldText ? oldText.split(/\r?\n/) : [];
+  const newLines = newText ? newText.split(/\r?\n/) : [];
+
+  if (!oldLines.length && newLines.length) {
+    const preview = newLines.slice(0, maxLines).map((l) => `+ ${l}`);
+    if (newLines.length > maxLines) preview.push(`… +${newLines.length - maxLines} more lines`);
+    return preview.join('\n');
+  }
+
+  let start = 0;
+  while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) {
+    start++;
+  }
+
+  let oldEnd = oldLines.length - 1;
+  let newEnd = newLines.length - 1;
+  while (oldEnd >= start && newEnd >= start && oldLines[oldEnd] === newLines[newEnd]) {
+    oldEnd--;
+    newEnd--;
+  }
+
+  const diffLines = [];
+  if (start > 0) {
+    diffLines.push(`  ${oldLines[start - 1]}`);
+  }
+
+  for (let i = start; i <= oldEnd && diffLines.length < maxLines; i++) {
+    diffLines.push(`- ${oldLines[i]}`);
+  }
+
+  for (let i = start; i <= newEnd && diffLines.length < maxLines * 2; i++) {
+    diffLines.push(`+ ${newLines[i]}`);
+  }
+
+  if (oldEnd + 1 < oldLines.length) {
+    diffLines.push(`  ${oldLines[oldEnd + 1]}`);
+  }
+
+  return diffLines.join('\n');
+}
+
 function record(captured) {
   if (!captured) return null;
   const after = [];
@@ -114,6 +160,7 @@ function record(captured) {
     createdDirectories: captured.createdDirectories,
     files: captured.before.map((previous, index) => ({
       path: previous.path,
+      diff: generateDiff(previous.content, after[index].content, previous.path),
       ...lineCounts(previous.content || Buffer.alloc(0), after[index].content || Buffer.alloc(0))
     }))
   };
@@ -181,4 +228,4 @@ function undo(entry, cfg) {
   return entry.files.map((file) => displayPath(entry.workspace, file.path));
 }
 
-module.exports = { capture, record, describe, undo };
+module.exports = { capture, record, describe, undo, generateDiff };
