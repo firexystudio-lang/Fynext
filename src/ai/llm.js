@@ -1,5 +1,7 @@
 'use strict';
 
+const api = require('./api');
+
 const toolSupportCache = new Map();
 
 async function* readLines(body) {
@@ -360,6 +362,7 @@ function withToolInstructions(messages, tools, structured = false) {
 
 async function modelSupportsTools(cfg) {
   if (cfg.provider === 'lumen') return false;
+  if (api.isApiProvider(cfg.provider)) return true;
   const key = cfg.model;
   if (toolSupportCache.has(key)) return toolSupportCache.get(key);
   let supported = false;
@@ -488,13 +491,19 @@ async function doRequest(cfg, messages, tools, signal, format) {
     if (err.name === 'TimeoutError' || /timeout/i.test(String(err.message || ''))) {
       throw new Error('Model response timed out.');
     }
-    throw new Error(`Could not connect to Ollama server (${url}): ${err.message}`);
+    throw new Error(
+      `Could not connect to Ollama server (${url}): ${err.message}\n` +
+      'Start Ollama, install a local model, or switch to a cloud provider with /engine openai|anthropic|gemini.'
+    );
   }
 }
 
 async function chat(cfg, messages, tools, onDelta, chatOptions = {}) {
   if (cfg.provider === 'lumen') {
     return require('../lumen').chat(cfg, messages, tools, onDelta, chatOptions);
+  }
+  if (api.isApiProvider(cfg.provider)) {
+    return api.chat(cfg, messages, tools, onDelta, chatOptions);
   }
   const validNames = toolNamesOf(tools);
   const forceTool = chatOptions.forceTool === true;
@@ -626,6 +635,9 @@ async function listModels(cfg) {
   if (cfg.provider === 'lumen') {
     return require('../lumen').listModels(cfg);
   }
+  if (api.isApiProvider(cfg.provider)) {
+    return api.listModels(cfg);
+  }
   try {
     const res = await fetch(cfg.ollamaUrl.replace(/\/$/, '') + '/api/tags', {
       signal: AbortSignal.timeout(8000)
@@ -642,6 +654,9 @@ async function listAvailableModels(cfg) {
   if (cfg.provider === 'lumen') {
     return require('../lumen').listAvailableModels();
   }
+  if (api.isApiProvider(cfg.provider)) {
+    return api.listAvailableModels(cfg);
+  }
   const models = await listModels(cfg);
   if (!models.length) throw new Error('Could not list Ollama models. Is Ollama running?');
   return models.sort((a, b) => a.localeCompare(b));
@@ -650,6 +665,9 @@ async function listAvailableModels(cfg) {
 async function warmup(cfg) {
   if (cfg.provider === 'lumen') {
     return require('../lumen').warmup(cfg);
+  }
+  if (api.isApiProvider(cfg.provider)) {
+    return api.warmup(cfg);
   }
   try {
     const res = await fetch(cfg.ollamaUrl.replace(/\/$/, '') + '/api/generate', {

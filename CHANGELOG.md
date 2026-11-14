@@ -6,11 +6,23 @@ All notable changes to Fynext are documented in this file.
 
 ### Added
 
+- Cloud provider support with API keys: OpenAI-compatible providers (OpenAI, OpenRouter, Groq, DeepSeek, Mistral and custom servers), Anthropic, and Google Gemini.
+- Streaming chat, native tool calling, usage accounting, and model listing for cloud providers in `src/ai/api.js`.
+- `/key [provider] [key]` command to show, save, verify, or remove an API key; keys are stored with owner-only file permissions.
+- `--provider`, `--api-key`, and `--base-url` CLI overrides plus `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, and `MISTRAL_API_KEY` environment variables.
+- Per-provider model memory (`providerModels`), so `/engine` restores the last model used with each provider.
 - Fynext Ported ESP32: expressive robot face firmware for the ESP32-2432S08 (CYD) with animated eyes, eyebrows, blinking, touch gaze and RGB LED moods.
 - USB serial bridge (`src/robot/face-bridge.js`) with auto port detection, reconnect and command throttling.
 - `/face on|off|ports|port|test|emotion|status` command and automatic emotion hooks for agent events.
 - `robotFaceEnabled`, `robotFacePort` and `robotFaceBaud` settings.
 - Firmware documentation in `firmware/fynext-ported-esp32/` and `docs/robot-face.md`.
+
+### Changed
+
+- Fynext no longer requires Ollama or an installed local model to start. Startup now warns and continues, so commands and provider configuration remain available.
+- Ollama startup no longer blocks for long when the server is unavailable, and model downloads are only automatic when `autoPullModel` is enabled (default: off).
+- `/engine` now switches between local engines and cloud providers.
+- `/model` and `/models` work with cloud providers and fall back to curated model lists when listing is unavailable.
 
 ## [1.0.0]
 

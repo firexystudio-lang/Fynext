@@ -1,7 +1,7 @@
 {
   "name": "@mfiretech/fynext",
   "version": "1.0.0",
-  "description": "Fynext - local LLM-powered coding agent for the terminal",
+  "description": "Fynext - LLM-powered coding agent for the terminal with local and cloud providers",
   "type": "commonjs",
   "main": "src/cli/main.js",
   "bin": {

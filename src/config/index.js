@@ -3,6 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const api = require('../ai/api');
 
 const ROOT = path.resolve(__dirname, '../..');
 
@@ -15,6 +16,12 @@ const DEFAULTS = {
     local: 'qwen2.5-coder:3b',
     remote: 'gpt-4o-mini'
   },
+  providerModels: {},
+  apiKey: '',
+  apiKeys: {},
+  apiBaseUrl: '',
+  apiBaseUrls: {},
+  autoPullModel: false,
   workflowPresets: [
     { id: 'review', label: 'Review & risk check', steps: ['/project', '/review', '/git'] },
     { id: 'build', label: 'Build & validate', steps: ['/mode build', 'npm test', 'npm run build'] },
@@ -82,11 +89,23 @@ function loadConfig() {
 
   const cfg = Object.assign({}, DEFAULTS, fileSettings);
   delete cfg.braveApiKey;
-  if (!['ollama', 'lumen'].includes(cfg.provider)) {
-    throw new Error(`Unknown model provider "${cfg.provider}". Supported providers: ollama, lumen.`);
+  cfg.provider = api.normalizeProviderId(cfg.provider);
+  const supportedProviders = ['ollama', 'lumen', ...api.providerIds()];
+  if (!supportedProviders.includes(cfg.provider)) {
+    throw new Error(
+      `Unknown model provider "${cfg.provider}". Supported providers: ${supportedProviders.join(', ')}.`
+    );
   }
-  if (cfg.provider === 'lumen' && !Object.prototype.hasOwnProperty.call(fileSettings, 'model')) {
-    cfg.model = require('../lumen/models').DEFAULT_MODEL_ID;
+  if (!cfg.apiKeys || typeof cfg.apiKeys !== 'object' || Array.isArray(cfg.apiKeys)) cfg.apiKeys = {};
+  if (!cfg.apiBaseUrls || typeof cfg.apiBaseUrls !== 'object' || Array.isArray(cfg.apiBaseUrls)) {
+    cfg.apiBaseUrls = {};
+  }
+  if (!cfg.providerModels || typeof cfg.providerModels !== 'object' || Array.isArray(cfg.providerModels)) {
+    cfg.providerModels = {};
+  }
+  if (!Object.prototype.hasOwnProperty.call(fileSettings, 'model')) {
+    if (cfg.provider === 'lumen') cfg.model = require('../lumen/models').DEFAULT_MODEL_ID;
+    else if (api.isApiProvider(cfg.provider)) cfg.model = api.defaultModel(cfg.provider);
   }
   cfg.lumenGpu = String(cfg.lumenGpu || 'auto').toLowerCase();
   if (!['auto', 'cpu'].includes(cfg.lumenGpu)) {
@@ -122,7 +141,15 @@ function saveSettingsPatch(patch) {
   }
   const next = Object.assign(settings, patch);
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-  fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2) + '\n', {
+    encoding: 'utf8',
+    mode: 0o600
+  });
+  try {
+    fs.chmodSync(settingsPath, 0o600);
+  } catch (_) {
+    /* Best effort on platforms without POSIX modes (Windows). */
+  }
 }
 
 module.exports = { ROOT, loadConfig, loadSystemPrompt, saveSettingsPatch, userSettingsPath };

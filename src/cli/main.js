@@ -7,6 +7,7 @@ const { spawnSync } = require('child_process');
 const pkg = require('../../package.json');
 const { loadConfig, loadSystemPrompt, saveSettingsPatch } = require('../config');
 const llm = require('../ai/llm');
+const api = require('../ai/api');
 const lumen = require('../lumen');
 const tools = require('../tools');
 const setup = require('../setup');
@@ -31,8 +32,10 @@ const COMMAND_HELP = [
   'Commands:',
   '  /help                   Show this help',
   '  /model [name]           Select or switch the model',
-  '  /models                 Select a local model for the current engine',
-  '  /engine [ollama|lumen]  Switch the local model engine',
+  '  /models                 Select a model for the current engine',
+  '  /engine [name]          Switch provider: ollama, lumen, openai, anthropic,',
+  '                          gemini, openrouter, groq, deepseek, mistral',
+  '  /key [provider] [key]   Show, save, or remove a cloud provider API key',
   '  /gpu [auto|cpu]         Show or set Lumen GPU usage (cpu is more stable)',
   '  /usage                  Show session token usage',
   '  /tools                  List available tools',
@@ -101,6 +104,10 @@ const FLAG_HELP = [
   '',
   'Options:',
   '  --model <name>        Model name (default: qwen2.5-coder:3b)',
+  '  --provider <name>     Provider: ollama, lumen, openai, anthropic, gemini,',
+  '                        openrouter, groq, deepseek, mistral',
+  '  --api-key <key>       Cloud API key override (prefer env vars or /key)',
+  '  --base-url <url>      Base URL override for the cloud provider',
   '  --workspace, -w <path> Workspace directory',
   '  --plain               Use the plain terminal instead of the full-screen UI',
   '  --prompt <text>       Run a one-shot task',
@@ -134,6 +141,9 @@ function parseArgs(argv) {
     plain: false,
     prompt: null,
     model: null,
+    provider: null,
+    apiKey: null,
+    baseUrl: null,
     workspace: null,
     restricted: false,
     approve: null,
@@ -170,6 +180,21 @@ function parseArgs(argv) {
         if (value == null) value = argv[++i];
         if (!value) throw new Error('--model requires a name');
         flags.model = value;
+        break;
+      case '--provider':
+        if (value == null) value = argv[++i];
+        if (!value) throw new Error('--provider requires a name');
+        flags.provider = value;
+        break;
+      case '--api-key':
+        if (value == null) value = argv[++i];
+        if (!value) throw new Error('--api-key requires a key');
+        flags.apiKey = value;
+        break;
+      case '--base-url':
+        if (value == null) value = argv[++i];
+        if (!value) throw new Error('--base-url requires a URL');
+        flags.baseUrl = value;
         break;
       case '--workspace':
       case '-w':
@@ -363,6 +388,18 @@ function buildSystemPrompt(cfg, base, mode) {
   return `${promptBase.trim()}\n${env}`;
 }
 
+function defaultModelForProvider(cfg, provider) {
+  if (provider === 'lumen') return lumen.DEFAULT_MODEL_ID;
+  if (api.isApiProvider(provider)) return api.defaultModel(provider);
+  return (cfg.modelProfiles && cfg.modelProfiles.local) || 'qwen2.5-coder:7b';
+}
+
+function rememberProviderModel(cfg, provider, model) {
+  const providerModels = Object.assign({}, cfg.providerModels, { [provider]: model });
+  cfg.providerModels = providerModels;
+  return providerModels;
+}
+
 async function main() {
   const flags = parseArgs(process.argv.slice(2));
 
@@ -379,6 +416,25 @@ async function main() {
 
   const cfg = loadConfig();
   theme.setTheme(cfg.theme);
+  if (flags.provider) {
+    const provider = api.normalizeProviderId(flags.provider);
+    const supported = ['ollama', 'lumen', ...api.providerIds()];
+    if (!supported.includes(provider)) {
+      throw new Error(`Unknown model provider "${flags.provider}". Options: ${supported.join(', ')}.`);
+    }
+    if (provider !== cfg.provider) {
+      cfg.provider = provider;
+      if (!flags.model) {
+        cfg.model = (cfg.providerModels && cfg.providerModels[provider]) ||
+          defaultModelForProvider(cfg, provider);
+      }
+    }
+  }
+  if (flags.apiKey) cfg.apiKey = flags.apiKey;
+  if (flags.baseUrl) {
+    cfg.apiBaseUrl = flags.baseUrl;
+    cfg.apiBaseUrls = Object.assign({}, cfg.apiBaseUrls, { [cfg.provider]: flags.baseUrl });
+  }
   if (flags.model) cfg.model = flags.model;
   if (flags.workspace) cfg.workspace = path.resolve(flags.workspace);
   if (flags.restricted) {
@@ -407,18 +463,22 @@ async function main() {
   const setupLog = uiMode && process.stdout.isTTY
     ? (startupSplash ? () => {} : (line) => process.stdout.write(line + '\n'))
     : (line) => process.stderr.write(line + '\n');
+  const startupWarnings = [];
   try {
     await setup.ensureReady(cfg, {
       tty: uiMode && !!process.stdout.isTTY && !startupSplash,
-      log: setupLog
+      log: setupLog,
+      warn: (line) => startupWarnings.push(String(line))
     });
   } catch (err) {
-    if (startupSplash) startupSplash();
-    process.stderr.write(`fynext: ${err.message}\n`);
-    process.exitCode = 1;
-    return;
+    // A missing local model, an offline Ollama server, or a bad cloud key
+    // must never prevent the UI from starting. Commands and /key still work.
+    startupWarnings.push(err && err.message ? err.message : String(err));
   }
   if (startupSplash) startupSplash();
+  if (!uiMode) {
+    for (const warning of startupWarnings) process.stderr.write(`fynext: ${warning}\n`);
+  }
 
   let systemPromptBase = loadSystemPrompt(cfg);
   try {
@@ -737,6 +797,9 @@ async function main() {
       if (!await lumen.isModelInstalled(cfg, model) && !await installModel(model.id)) {
         throw new Error(`Lumen model "${model.name}" is required. Run /model ${model.id} to try again.`);
       }
+    }
+    if (api.isApiProvider(cfg.provider) && !api.resolveApiKey(cfg)) {
+      throw new Error(api.missingKeyMessage(cfg));
     }
     activeController = new AbortController();
     cfg.abortSignal = activeController.signal;
@@ -1064,6 +1127,10 @@ async function main() {
   }
 
   async function installModel(name) {
+    if (api.isApiProvider(cfg.provider)) {
+      if (!api.resolveApiKey(cfg)) presenter.note(api.missingKeyMessage(cfg));
+      return true;
+    }
     const list = await llm.listModels(cfg);
     if (setup.hasModel(list, name)) return true;
     const lumenModel = cfg.provider === 'lumen' ? lumen.getModel(name) : null;
@@ -1174,34 +1241,127 @@ async function main() {
     }
 
     if (['engine', 'provider', 'motor'].includes(cmd)) {
+      const supported = ['ollama', 'lumen', ...api.providerIds()];
       if (!arg) {
-        commandNote(`Model engine: ${cfg.provider}\nOptions: ollama, lumen\nUse /engine <name> to switch.`);
+        commandNote(
+          `Model engine: ${cfg.provider}\nOptions: ${supported.join(', ')}\nUse /engine <name> to switch.`
+        );
         return;
       }
-      const provider = arg.toLowerCase();
-      if (!['ollama', 'lumen'].includes(provider)) {
-        commandError(`Unknown model engine: ${arg}. Options: ollama, lumen.`);
+      const provider = api.normalizeProviderId(arg);
+      if (!supported.includes(provider)) {
+        commandError(`Unknown model engine: ${arg}. Options: ${supported.join(', ')}.`);
         return;
       }
       if (provider === cfg.provider) {
         commandNote(`Model engine is already ${provider}.`);
         return;
       }
-      let selectedModel = cfg.model;
-      if (provider === 'lumen') {
-        if (!lumen.getModel(selectedModel)) selectedModel = lumen.DEFAULT_MODEL_ID;
-      } else if (lumen.getModel(cfg.model)) {
-        selectedModel = 'qwen2.5-coder:7b';
-      }
-      saveSettingsPatch({ provider, model: selectedModel });
+      const selectedModel = (cfg.providerModels && cfg.providerModels[provider]) ||
+        defaultModelForProvider(cfg, provider);
+      const providerModels = rememberProviderModel(cfg, cfg.provider, cfg.model);
+      saveSettingsPatch({ provider, model: selectedModel, providerModels });
       cfg.provider = provider;
       cfg.model = selectedModel;
+      refreshSystem();
       presenter.setInfo({ model: cfg.model });
-      commandNote(
-        provider === 'lumen'
-          ? `Model engine: Lumen\nChoose a model with /models.`
-          : `Model engine: Ollama\nChoose a model with /models. If Ollama was not running when Fynext started, restart Fynext to initialize it.`
-      );
+      if (api.isApiProvider(provider)) {
+        const info = api.getProvider(provider);
+        const key = api.resolveApiKey(cfg);
+        commandNote(
+          key
+            ? `Model engine: ${info.label}\nModel: ${cfg.model}\nUse /models to choose a model or /key to update the API key.`
+            : `Model engine: ${info.label}\nAPI key is not set. Run /key <key> or set ${info.envKeys[0]}.`
+        );
+      } else if (provider === 'lumen') {
+        commandNote('Model engine: Lumen\nChoose a model with /models.');
+      } else {
+        commandNote(
+          'Model engine: Ollama\nChoose a model with /models. ' +
+          'If Ollama is not running, Fynext keeps working; install it or switch to a cloud provider with /engine.'
+        );
+      }
+      return;
+    }
+
+    if (['key', 'apikey', 'api-key', 'anahtar'].includes(cmd)) {
+      const parts = arg.split(/\s+/).filter(Boolean);
+      let target = api.getProvider(cfg.provider);
+      if (parts.length && api.getProvider(parts[0])) {
+        target = api.getProvider(parts.shift());
+      }
+      if (!target) {
+        commandError(
+          'API keys apply to cloud providers. Use /key <provider> <key> or switch with ' +
+          '/engine openai|anthropic|gemini|openrouter|groq|deepseek|mistral.'
+        );
+        return;
+      }
+
+      if (!parts.length) {
+        const key = api.resolveApiKey(Object.assign({}, cfg, { provider: target.id }));
+        const source = api.apiKeySource(Object.assign({}, cfg, { provider: target.id }));
+        const lines = [`Provider: ${target.label}`];
+        if (key) {
+          const where = source.source === 'environment'
+            ? source.env
+            : source.source === 'session'
+              ? 'session override'
+              : 'saved settings';
+          lines.push(`API key: ${api.maskKey(key)} (${where})`);
+        } else {
+          lines.push('API key: not set');
+          lines.push(`Environment variable: ${target.envKeys.join(' or ')}`);
+        }
+        lines.push('Set: /key <key>');
+        lines.push('Remove the saved key: /key remove');
+        commandNote(lines.join('\n'));
+        return;
+      }
+
+      if (parts.length === 1 && ['remove', 'clear', 'delete', 'sil'].includes(parts[0].toLowerCase())) {
+        const apiKeys = Object.assign({}, cfg.apiKeys);
+        delete apiKeys[target.id];
+        saveSettingsPatch({ apiKeys });
+        cfg.apiKeys = apiKeys;
+        commandNote(`${target.label} API key removed from saved settings.`);
+        return;
+      }
+
+      const key = parts.join(' ').trim();
+      if (!key) {
+        commandError('Usage: /key [provider] <api-key>');
+        return;
+      }
+      if (/\s/.test(key)) {
+        commandError('The API key must not contain spaces.');
+        return;
+      }
+      const apiKeys = Object.assign({}, cfg.apiKeys, { [target.id]: key });
+      saveSettingsPatch({ apiKeys });
+      cfg.apiKeys = apiKeys;
+      const wasCurrent = target.id === cfg.provider;
+      presenter.setBusy(true);
+      presenter.setInfo({ status: 'Validating API key' });
+      try {
+        const models = await api.listModels(wasCurrent ? cfg : Object.assign({}, cfg, {
+          provider: target.id,
+          model: (cfg.providerModels && cfg.providerModels[target.id]) || target.defaultModel
+        }));
+        const preview = models.slice(0, 6).join(', ') + (models.length > 6 ? ', …' : '');
+        commandNote(
+          `${target.label} API key saved and verified.` +
+          (models.length ? `\n${models.length} model(s) available: ${preview}` : '') +
+          (wasCurrent ? '' : `\nSwitch with /engine ${target.id}.`)
+        );
+      } catch (err) {
+        commandError(
+          `API key saved for ${target.label}, but verification failed: ${err.message}`
+        );
+      } finally {
+        presenter.setBusy(false);
+        presenter.setInfo({ status: mode });
+      }
       return;
     }
 
@@ -1654,14 +1814,18 @@ async function main() {
           }
           if (typeof presenter.selectOption === 'function') {
             requestedModel = await presenter.selectOption(
-              'Select a local Ollama model',
+              api.isApiProvider(cfg.provider)
+                ? `Select a ${api.getProvider(cfg.provider).label} model`
+                : 'Select a local Ollama model',
               availableModels,
               cfg.model
             );
             if (!requestedModel) return;
           } else {
             commandNote(
-              `Local models:\n${availableModels.map((name) => `${name === cfg.model ? '* ' : '  '}${name}`).join('\n')}\nSelect one with /model <name>.`
+              `${api.isApiProvider(cfg.provider) ? api.getProvider(cfg.provider).label : 'Local'} models:\n` +
+              `${availableModels.map((name) => `${name === cfg.model ? '* ' : '  '}${name}`).join('\n')}\n` +
+              'Select one with /model <name>.'
             );
             return;
           }
@@ -1670,10 +1834,15 @@ async function main() {
       const installed = await installModel(requestedModel);
       if (!installed) return;
       cfg.model = requestedModel;
-      saveSettingsPatch({ model: cfg.model });
+      const providerModels = rememberProviderModel(cfg, cfg.provider, cfg.model);
+      saveSettingsPatch({ model: cfg.model, providerModels });
       refreshSystem();
       presenter.setInfo({ model: cfg.model });
-      commandNote(`Model: ${cfg.model}`);
+      if (api.isApiProvider(cfg.provider) && !api.resolveApiKey(cfg)) {
+        commandNote(`Model: ${cfg.model}\n${api.missingKeyMessage(cfg)}`);
+      } else {
+        commandNote(`Model: ${cfg.model}`);
+      }
       return;
     }
 
@@ -1967,6 +2136,7 @@ async function main() {
 
   if (interactive || plainRepl) {
     presenter.start();
+    for (const warning of startupWarnings) presenter.note(warning);
     await loadStartupConversation();
     if (cfg.provider === 'ollama') llm.warmup(cfg).catch(() => {});
     if (plainRepl) {

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const api = require('../ai/api');
 
 function baseUrl(cfg) {
   return String(cfg.ollamaUrl || 'http://127.0.0.1:11434').replace(/\/+$/, '');
@@ -88,20 +89,31 @@ function ollamaBinary() {
 }
 
 function startOllama() {
-  const bin = ollamaBinary();
-  try {
-    const child = spawn(bin, ['serve'], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-      env: process.env
-    });
-    child.on('error', () => {});
-    child.unref();
-    return true;
-  } catch (_) {
-    return false;
-  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    try {
+      const child = spawn(ollamaBinary(), ['serve'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        env: process.env
+      });
+      child.once('error', () => finish(false));
+      child.once('spawn', () => {
+        child.unref();
+        finish(true);
+      });
+      const timer = setTimeout(() => finish(true), 1500);
+      if (timer && typeof timer.unref === 'function') timer.unref();
+    } catch (_) {
+      finish(false);
+    }
+  });
 }
 
 async function waitForOllama(cfg, seconds, onTick) {
@@ -147,65 +159,102 @@ async function pullModel(cfg, model, onProgress) {
   }
 }
 
+function emitWarning(options, message) {
+  if (typeof options.warn === 'function') options.warn(message);
+  else if (typeof options.log === 'function') options.log(message);
+}
+
 async function ensureReady(cfg, opts) {
   const options = opts || {};
   const log = options.log || ((line) => process.stdout.write(line + '\n'));
+  const warn = (line) => emitWarning(options, line);
   const tty = options.tty !== undefined ? options.tty : !!process.stdout.isTTY;
 
   if (cfg.provider === 'lumen') {
     const lumen = require('../lumen');
     const model = lumen.getModel(cfg.model);
     if (!model) {
-      throw new Error(`Unknown Lumen model "${cfg.model}". Choose a supported model with /models.`);
+      warn(`Unknown Lumen model "${cfg.model}". Choose a supported model with /models.`);
+      return [];
     }
     if (!await lumen.isModelInstalled(cfg, model)) {
-      log(`Lumen model is not installed. Run /model ${model.id} to download it (${formatBytes(model.size)}).`);
+      warn(`Lumen model "${model.name}" is not installed. Run /model ${model.id} to download it (${formatBytes(model.size)}).`);
     }
     return lumen.listModels(cfg);
   }
-  if (cfg.provider !== 'ollama') {
-    throw new Error(`Unsupported model provider: ${cfg.provider}`);
+
+  if (api.isApiProvider(cfg.provider)) {
+    const info = api.getProvider(cfg.provider);
+    const key = api.resolveApiKey(cfg);
+    if (!key) {
+      warn(api.missingKeyMessage(cfg));
+      return [];
+    }
+    if (options.validateApi === true) {
+      try {
+        const models = await api.listModels(cfg);
+        return models;
+      } catch (err) {
+        warn(`Could not verify the ${info.label} API key: ${err.message}`);
+        return [];
+      }
+    }
+    return [];
   }
 
-  let models = await fetchTags(cfg, 3000);
+  if (cfg.provider !== 'ollama') {
+    warn(`Unsupported model provider: ${cfg.provider}`);
+    return [];
+  }
+
+  let models = await fetchTags(cfg, 1500);
   if (!models) {
     if (!isLocalUrl(cfg)) {
-      throw new Error(
-        `Cannot reach Ollama: ${baseUrl(cfg)}\nCheck that the remote server is running and the URL is correct.`
+      warn(
+        `Cannot reach Ollama at ${baseUrl(cfg)}. Check that the remote server is running; Fynext will still start.`
       );
+      return [];
     }
     log('Starting Ollama…');
-    if (!startOllama()) {
-      throw new Error(
-        'Could not start Ollama.\nInstall it from: https://ollama.com/download\nThen reopen the terminal or run "ollama serve".'
-      );
+    if (await startOllama()) {
+      let dots = 0;
+      const waitSeconds = Number(options.waitSeconds) > 0 ? Number(options.waitSeconds) : 8;
+      models = await waitForOllama(cfg, waitSeconds, () => {
+        dots += 1;
+        if (!tty && dots % 4 === 0) log('Waiting for Ollama…');
+      });
     }
-    let dots = 0;
-    models = await waitForOllama(cfg, 25, () => {
-      dots += 1;
-      if (!tty && dots % 10 === 0) log('Waiting for Ollama…');
-    });
     if (!models) {
-      throw new Error(
-        'Ollama is not running.\nInstall it from: https://ollama.com/download\nThen reopen the terminal or run "ollama serve".'
+      warn(
+        'Ollama is not running or installable. Fynext will start without a local model.\n' +
+        'Install it from https://ollama.com/download, run "ollama serve", ' +
+        'or switch to a cloud provider with /engine openai|anthropic|gemini.'
       );
+      return [];
     }
   }
 
   if (!hasModel(models, cfg.model)) {
-    log(`Downloading model: ${cfg.model}`);
-    let last = '';
-    const render = (event) => {
-      const text = progressText(event);
-      if (text === last) return;
-      last = text;
-      if (tty) process.stdout.write('\r\x1b[2K' + text);
-      else log(text);
-    };
-    await pullModel(cfg, cfg.model, render);
-    if (tty) process.stdout.write('\r\x1b[2K');
-    log(`Model ready: ${cfg.model}`);
-    models = (await fetchTags(cfg, 5000)) || models.concat([cfg.model]);
+    if (cfg.autoPullModel === true) {
+      log(`Downloading model: ${cfg.model}`);
+      let last = '';
+      const render = (event) => {
+        const text = progressText(event);
+        if (text === last) return;
+        last = text;
+        if (tty) process.stdout.write('\r\x1b[2K' + text);
+        else log(text);
+      };
+      await pullModel(cfg, cfg.model, render);
+      if (tty) process.stdout.write('\r\x1b[2K');
+      log(`Model ready: ${cfg.model}`);
+      models = (await fetchTags(cfg, 5000)) || models.concat([cfg.model]);
+    } else {
+      warn(
+        `Ollama model "${cfg.model}" is not installed. ` +
+        `Choose an installed model with /models or download it with /model ${cfg.model}.`
+      );
+    }
   }
 
   return models;

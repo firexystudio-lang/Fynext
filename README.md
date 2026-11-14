@@ -35,8 +35,9 @@ It is an open-source solution that runs securely on your computer.
 | :-- | :-- |
 | **Intelligent Code Analysis** | Analyzes your codebase and provides suggestions for improvement. |
 | **Project Management** | Understands and organizes your project’s file structure. |
-| **Local Execution** | All processing happens locally; your data never leaves your machine. |
+| **Local or Cloud** | Run fully locally with Ollama/Lumen, or use a cloud provider with your own API key. |
 | **Lumen engine** | Run quantized GGUF models locally with llama.cpp, without requiring Ollama. |
+| **Cloud API keys** | OpenAI, Anthropic, Gemini, OpenRouter, Groq, DeepSeek, Mistral, or any OpenAI-compatible endpoint. |
 | **Fast Processing** | Runs fast thanks to optimized performance. |
 | **Targeted Solutions** | Customizable for specific tasks. |
 | **Command Palette** | Search and run slash commands with `Ctrl+P` / `Ctrl+N`. |
@@ -63,7 +64,8 @@ Touch makes the robot look at your finger.
 | Command | Description |
 | :-- | :-- |
 | `/help` | List commands and shortcuts. |
-| `/engine [ollama\|lumen]` | Switch the local model engine. |
+| `/engine [name]` | Switch provider: `ollama`, `lumen`, `openai`, `anthropic`, `gemini`, `openrouter`, `groq`, `deepseek`, `mistral`. |
+| `/key [provider] [key]` | Show, save, verify, or remove a cloud provider API key. |
 | `/gpu [auto\|cpu]` | Show or set Lumen GPU usage. `cpu` is slower but more stable. |
 | `/model`, `/models` | Switch models or choose a downloadable Lumen GGUF model. |
 | `/review`, `/plan`, `/build`, `/mode` | Review, plan, or build workflows. |
@@ -121,6 +123,8 @@ These additions would make Fynext more useful as an everyday local engineering a
 | :-- | :-- | :-- |
 | Operating system | Windows, Linux, or macOS | Required |
 | Node.js | 20 or later | Required |
+| Ollama or Lumen | Current release | Optional |
+| Cloud API key | Any supported provider | Optional |
 | Python | 3.8 or later | Optional |
 
 ### Installation
@@ -131,9 +135,63 @@ Install Fynext globally via npm:
 npm install -g github:firexystudio-lang/Fynext
 ```
 
+### Using a cloud provider (API key)
+
+Fynext can start without Ollama or any local model. Switch to a cloud provider, save your key, and choose a model:
+
+```text
+/engine openai
+/key sk-...
+/models
+```
+
+Supported providers: `openai`, `anthropic`, `gemini`, `openrouter`, `groq`, `deepseek`, and `mistral`. The `openai` provider also works with local or self-hosted OpenAI-compatible servers (LM Studio, vLLM, Ollama's OpenAI endpoint, and others) by setting a custom base URL:
+
+```json
+{
+  "provider": "openai",
+  "apiBaseUrl": "http://127.0.0.1:1234/v1",
+  "model": "local-model"
+}
+```
+
+The plain `apiBaseUrl` setting only applies to OpenAI-compatible providers. To route Anthropic or Gemini through a proxy, use the per-provider map:
+
+```json
+{
+  "provider": "anthropic",
+  "apiBaseUrls": {
+    "anthropic": "https://my-proxy.example.com/v1",
+    "gemini": "https://my-gemini-proxy.example.com/v1beta"
+  }
+}
+```
+
+Keys are stored in the Fynext user configuration directory (`~/.config/fynext/settings.json` on Linux/macOS, `%APPDATA%\fynext\settings.json` on Windows) with owner-only permissions. Environment variables are also supported and take effect without writing the key to disk:
+
+| Provider | Environment variable |
+| :-- | :-- |
+| OpenAI | `OPENAI_API_KEY` |
+| Anthropic | `ANTHROPIC_API_KEY` |
+| Gemini | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| DeepSeek | `DEEPSEEK_API_KEY` |
+| Mistral | `MISTRAL_API_KEY` |
+
+You can also override the provider, key, or base URL for one session:
+
+```bash
+fynext --provider anthropic --model claude-sonnet-4-5
+fynext --provider openai --base-url http://127.0.0.1:1234/v1 --model local-model
+```
+
+> [!NOTE]
+> When no local model is installed and no API key is configured, Fynext still opens so you can use commands, manage history, and configure a provider. Model-backed prompts will return a clear setup error instead of exiting at startup.
+
 ### Using Lumen
 
-Fynext keeps Ollama as the default engine. In the CLI, switch to Lumen and choose a model:
+Fynext ships with Ollama as the default engine. In the CLI, switch to Lumen and choose a model:
 
 ```text
 /engine lumen
@@ -151,7 +209,7 @@ Models are stored in the Fynext user configuration directory under `models/lumen
 bin/            CLI entry point
 src/cli/        main orchestration and TUI wiring
 src/agent/      intent routing and tool status formatting
-src/ai/         Ollama client and tool-call parsing
+src/ai/         Ollama, cloud API clients, and tool-call parsing
 src/tools/      filesystem, git, web, and shell tools
 src/context/    project memory and conversation context
 src/history/    chat history and change tracking (undo/redo)

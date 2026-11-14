@@ -18,7 +18,8 @@ const SLASH_COMMANDS = [
   { name: 'help', description: 'Show commands and keyboard shortcuts' },
   { name: 'model', description: 'Select or switch the model', takesArgs: true },
   { name: 'models', description: 'Select a model for the current engine' },
-  { name: 'engine', description: 'Switch between Ollama and Lumen', takesArgs: true },
+  { name: 'engine', description: 'Switch provider (Ollama, Lumen, or a cloud API)', takesArgs: true },
+  { name: 'key', description: 'Show, save, or remove a cloud provider API key', takesArgs: true },
   { name: 'gpu', description: 'Show or set Lumen GPU usage', takesArgs: true },
   { name: 'usage', description: 'Show session token usage' },
   { name: 'tools', description: 'List available tools' },
@@ -65,8 +66,21 @@ const SLASH_ARGUMENTS = {
   },
   model: { hint: 'Press Enter to choose a model, or type its name.' },
   engine: {
-    hint: 'Choose a local model engine:',
-    options: ['ollama', 'lumen']
+    hint: 'Choose a model provider:',
+    options: [
+      'ollama',
+      'lumen',
+      'openai',
+      'anthropic',
+      'gemini',
+      'openrouter',
+      'groq',
+      'deepseek',
+      'mistral'
+    ]
+  },
+  key: {
+    hint: 'Enter an API key, or type "remove" to delete the saved key.'
   },
   gpu: {
     hint: 'Choose Lumen GPU usage:',
