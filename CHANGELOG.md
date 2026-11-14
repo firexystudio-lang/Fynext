@@ -23,6 +23,7 @@ All notable changes to Fynext are documented in this file.
 - Ollama startup no longer blocks for long when the server is unavailable, and model downloads are only automatic when `autoPullModel` is enabled (default: off).
 - `/engine` now switches between local engines and cloud providers.
 - `/model` and `/models` work with cloud providers and fall back to curated model lists when listing is unavailable.
+- Lumen model downloads now resume automatically after network drops or stalls instead of failing with `terminated`; up to six attempts are made and the `.partial` file is kept between runs.
 
 ## [1.0.0]
 
