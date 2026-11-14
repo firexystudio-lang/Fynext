@@ -148,11 +148,11 @@ function readGitInfo(cfg) {
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
     ).trim() || 'detached';
     const status = execSync(
-      `git -C "${cfg.workspace}" status --short --branch 2>NUL`,
+      `git -C "${cfg.workspace}" status --short --branch`,
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
     ).trim() || 'No Git status';
     const recentCommits = execSync(
-      `git -C "${cfg.workspace}" log --oneline -5 2>NUL`,
+      `git -C "${cfg.workspace}" log --oneline -5`,
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
     ).trim();
     return {
