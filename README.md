@@ -260,6 +260,12 @@ The project now ships with reusable action sets for common engineering tasks:
 - Changelog summary → `/git` → `git log --oneline -10` → summarize changes
 - PR summary → `/project` → `/git` → review changed files → summarize impact
 
+## License
+
+Fynext is released under the [MIT License](LICENSE). You are free to use, modify and distribute it, provided the copyright notice and permission notice are included.
+
+Copyright (c) 2026 FirexyTeam.
+
 ## Contributing
 
 Your contributions are greatly appreciated. Use the **Issues** section for bug reports and suggestions, and follow the steps below to contribute code:
