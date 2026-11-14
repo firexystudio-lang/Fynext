@@ -1168,7 +1168,15 @@ async function main() {
           presenter.setInfo({
             status: `Downloading Lumen model ${pct}% (${setup.formatBytes(event.completed)} / ${setup.formatBytes(event.total)})`
           });
-        }, { signal: controller.signal });
+        }, {
+          signal: controller.signal,
+          onRetry: ({ attempt, maxAttempts }) => {
+            presenter.note(
+              `Model download interrupted; resuming automatically (attempt ${attempt + 1}/${maxAttempts}).`
+            );
+            presenter.setInfo({ status: 'Resuming model download' });
+          }
+        });
       } else {
         await setup.pullModel(cfg, name, (event) => {
           if (!event.total || event.completed == null) return;

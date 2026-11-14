@@ -195,6 +195,46 @@ test('resumes an interrupted model download using a verified byte range', async 
   assert.equal(await fs.promises.readFile(file).then((value) => value.equals(data)), true);
 });
 
+test('retries automatically and resumes when the connection drops mid-download', async (t) => {
+  const directory = await createTempDir(t);
+  const data = Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(256, 3)]);
+  const cut = 100;
+  let requests = 0;
+  const url = await startServer(t, (request, response) => {
+    requests += 1;
+    if (requests === 1) {
+      assert.equal(request.headers.range, undefined);
+      response.writeHead(200, { 'Content-Length': data.length });
+      response.write(data.subarray(0, cut), () => {
+        setTimeout(() => response.destroy(), 50);
+      });
+      return;
+    }
+    const match = /^bytes=(\d+)-$/.exec(request.headers.range || '');
+    assert.ok(match, 'retry should request the remaining bytes with a Range header');
+    const offset = Number(match[1]);
+    assert.ok(offset > 0 && offset < data.length, `unexpected resume offset: ${offset}`);
+    response.writeHead(206, {
+      'Content-Length': data.length - offset,
+      'Content-Range': `bytes ${offset}-${data.length - 1}/${data.length}`
+    });
+    response.end(data.subarray(offset));
+  });
+  const model = fixtureModel(url, data);
+  const retries = [];
+
+  const file = await lumen.downloadModel({}, model.id, null, {
+    catalog: [model],
+    modelDirectory: directory,
+    retryDelayMs: 0,
+    onRetry: (event) => retries.push(event)
+  });
+
+  assert.equal(requests, 2);
+  assert.equal(retries.length, 1);
+  assert.equal(await fs.promises.readFile(file).then((value) => value.equals(data)), true);
+});
+
 test('rejects a model whose downloaded bytes fail the catalog hash', async (t) => {
   const directory = await createTempDir(t);
   const data = Buffer.concat([Buffer.from('GGUF'), Buffer.from('changed')]);
